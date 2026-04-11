@@ -114,18 +114,17 @@ When `OBS_AUTH_TOKEN` is set, all `/api/*` endpoints require
 
 ## Correctness verification from the shell
 
-Two one-liners you can run any time to prove the DB is trustworthy.
+Five one-liners, each answering a different correctness question.
 
 ### "Does the DB match the official dashboard, to the token?"
 
 ```bash
-./tests/run-all.sh          # runs every suite, exits non-zero on any drift
-# or just the ground-truth diff:
-node --experimental-sqlite --experimental-strip-types --no-warnings \
-  tests/cross-check-official.ts
+npm run test:cross-check
 ```
 
-Expected output ends with
+Pulls `openclaw sessions --all-agents --active 60 --json` and diffs every
+returned `(session_key, sessionId)` against obs.db. Constitution §1.3.1.
+Expected tail:
 
 ```
 RESULT: PASS — every overlapping session matches within tolerance
@@ -134,13 +133,46 @@ RESULT: PASS — every overlapping session matches within tolerance
 ### "Does every currently-existing transcript match what the watcher ingested?"
 
 ```bash
-node --experimental-sqlite --experimental-strip-types --no-warnings \
-  tests/replay-verify.ts
+npm run test:replay
 ```
 
 Reads every `.jsonl` on disk, reparses it from scratch, and compares
-per-`run_id` step counts to `obs.db`. PASS = the parser and the watcher
+per-`run_id` step counts to obs.db. PASS = the parser and the watcher
 agree, byte for byte, on everything currently stored.
+
+### "Are the schema and value invariants holding on the live DB?"
+
+```bash
+npm run test:integrity
+```
+
+44 assertions: enum guards on `node_type / status / role / error_type`,
+no NULLs in non-nullable columns, no negative durations, error rows have
+`error_text`, every `source='transcript+auth'` session base key has
+matching steps, plus `/api/sessions / /api/summary / /healthz` cross-
+check against direct SQL.
+
+### "Does our biggest live session round-trip end-to-end?"
+
+```bash
+npm run test:live-e2e
+```
+
+Picks the top 3 non-cron sessions in obs.db by step count, walks each
+transcript file → clean parse → DB → `openclaw sessions --json` → HTTP
+API trace. 14 assertions including step_id parity per run_id and
+trace-span-set parity.
+
+### "Run everything"
+
+```bash
+npm test                # all 9 suites — needs live obs-v2 + transcripts
+npm run test:hermetic   # only the 4 hermetic suites — runs on a clean clone
+```
+
+Any FAIL line tells you exactly which session / which step / which token
+is off. See the README's **Data correctness** section for the full
+catalogue.
 
 ## Useful ad-hoc queries
 
