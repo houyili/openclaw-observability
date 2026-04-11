@@ -3,26 +3,38 @@
 A self-hosted observability dashboard for the
 [OpenClaw](https://github.com/) agent runtime. Shows every running session,
 its current operation, blockers, token usage, skill / script / MCP
-statistics, and a per-run execution trace — all derived from the raw
-transcript JSONL that OpenClaw writes to disk.
+statistics, a per-run execution trace, **and a per-session Context Length
+analysis** (coarse 5-bucket breakdown + fine-grained per-turn timeline
+with phase detection, top spikes, and death-loop heuristics) — all
+derived from the raw transcript JSONL that OpenClaw writes to disk.
+
+Operators can also drive everything from any chat channel via 9 plain-
+text `/observ <subcommand>` commands (status, stuck, top, skills,
+scripts, mcps, errors, help) — no LLM in the loop, just a CLI wrapper
+around the same storage layer.
 
 **Design goals**
 
 1. **Zero invasion.** Does not touch the OpenClaw process, its config, or
    any agent workspace. Runs as a standalone Node service that reads
-   `~/.openclaw/agents/*/sessions/*.jsonl` and the `openclaw sessions --json`
-   CLI output.
+   `~/.openclaw/agents/<agent>/sessions/<id>.jsonl` and the
+   `openclaw sessions --json` CLI output.
 2. **Canonical correctness.** Token numbers must match the OpenClaw
    official dashboard exactly. This is enforced by an automated
    `cross-check` regression suite, not just asserted.
-3. **Frugal on CPU.** Designed to sit on a laptop indefinitely. Steady
-   state is < 2 % of one core on a 19 000-step database.
-4. **Persist everything, prune nothing.** All ingested steps stay in SQLite
+3. **First-principles honesty.** Every Context Length bucket and every
+   per-turn metric is mechanically derivable from existing transcript
+   fields. The `unaccounted` bucket is a feature, not a bug — it makes
+   visible the gap between "what we can attribute" and "what the model
+   actually saw".
+4. **Frugal on CPU.** Designed to sit on a laptop indefinitely. Steady
+   state is < 2 % of one core on a 22 000-step database.
+5. **Persist everything, prune nothing.** All ingested steps stay in SQLite
    forever; history from deleted transcripts is intentionally preserved.
 
 The architectural rationale and iteration history live in
-`agents_design_doc/observability/` (see `round1_...md`, `round2_...md`,
-`round3_...md`).
+`agents_design_doc/observability/` (see `round1_…md` through
+`round6_…md`, plus `observability_v2_user_manual.md`).
 
 ---
 
@@ -122,7 +134,7 @@ See the **Data correctness** section below for what each suite proves.
 
 ## Data correctness
 
-Nine test suites enforce correctness automatically. The four hermetic
+Eleven test suites enforce correctness automatically. The six hermetic
 ones run anywhere; the five live ones run against the user's real obs-v2
 install.
 
@@ -135,7 +147,7 @@ basic `parseTranscript` output. **42 cases.**
 
 #### 2. `invariants` — `tests/parser-invariants.test.ts`
 
-Structural invariants on `parseTranscript`. **35 cases.**
+Structural invariants on `parseTranscript`. **43 cases.**
 
 - Run splitting on user messages
 - MODEL_THINK duration = assistant_ts − prev_entry_ts
@@ -148,6 +160,12 @@ Structural invariants on `parseTranscript`. **35 cases.**
 - Error propagation from `toolResult` → `toolCall`
 - Step ordering: dense seq, monotone ts_epoch_ms, unique step_ids
 - Edge cases: empty assistant, thinking-only, orphan-entries-before-user
+- **Round 6**: `usage.input` → `input_tokens`, `usage.cacheRead` →
+  `cache_read_tokens`, thinking blocks → `thinking_text_len`, REPLY text
+  → full `reply_text_len`. REPLY rows do NOT carry `thinking_text_len`
+  when a MODEL_THINK companion already captured it (no double-counting).
+  Tool-call rows have NULL `input_tokens` (per-tool input is not
+  knowable from the LLM API).
 
 #### 3. `fixture` — `tests/fixture-ingest.test.ts`
 
@@ -183,11 +201,65 @@ pill, **20 assertions** in three layers, all hermetic:
   `ServerResponse`, calls `handleHealthRoute`, asserts
   `authPoll.stale === true` and `lastError` carries the message.
 
+#### 5. `context-length` — `tests/context-length.test.ts` *(Round 6)*
+
+End-to-end hermetic verification of the **§1.2 #16 Context Length view**
+— both the coarse 5-bucket breakdown and the fine-grained per-turn
+timeline (postmortem-style). **86 assertions** in 6 groups:
+
+- **Schema migration** is idempotent across re-opens (4 new columns:
+  `input_tokens`, `cache_read_tokens`, `thinking_text_len`,
+  `reply_text_len`)
+- **Parser populates new fields** correctly per row type (MODEL_THINK,
+  REPLY, tool_call, toolResult)
+- **`getContextBreakdown`** (coarse 5-bucket) on a hand-derived 4-turn
+  fixture: every `deltaFromPrev`, `contributors.{priorOutput,
+  toolResultsCharApprox, mcpDelta, unaccounted}`, and bucket total is
+  asserted against an arithmetic ground truth. The sanity invariant
+  **`baseline + Σ Δᵢ == totalLatest`** is enforced.
+- **`getContextTimeline`** (fine-grained) on the same fixture: per-turn
+  rows, cumulative aggregates (intentionally double-counted
+  `totalOutputTokens` due to per-tool approximation, asserted exactly),
+  top-N spike ordering, cache hit rate.
+- **Death-loop heuristic detection**: a second synthetic transcript with
+  12 read-only turns + repeated file reads + ≥85 % cache hit triggers
+  `healthVerdict='stuck'`, populates `suspectedLoopWindows`, sets
+  `consecutiveNoWriteTurns≥12`, and lists the hot file in
+  `repeatedFileReads`. The healthy 4-turn fixture is asserted to report
+  `'healthy'`.
+- **HTTP route handler**: calls `handleSessionsRoutes.context` directly
+  with a mock `res` + `sendJson` (avoids binding to port 18902 which the
+  live obs-v2 owns), asserts payload shape and 404 path on unknown
+  session.
+
+#### 6. `cli-commands` — `tests/cli-commands.test.ts` *(Round 6)*
+
+End-to-end hermetic verification of the **§5 channel CLI** — every
+`/observ` subcommand handler against a temp DB seeded with predictable
+synthetic rows. **86 assertions.**
+
+For each of the 9 subcommands (`status / stuck / top / skills / scripts
+/ mcps / errors / help`, plus the no-arg URL fallthrough):
+
+- exit code 0
+- output starts with `*observability-v2 …*` header
+- expected substrings (specific keys, counts, error types)
+- line count ≤ tight upper bound
+- **NO emojis** (regex `[\u{1F300}-\u{1FAFF}]` does NOT match)
+- **NO Unicode box-drawing chars** (Telegram strips them)
+
+Plus dispatcher-level edge cases:
+
+- Unknown subcommand → exit 1 + help text
+- `parseCommand` strips a leading `/observ` or `observ` token
+- `parseCommand` defaults to `help` on empty argv
+- `/observ skills week` → handler sees `range='week'`
+
 ### Live suites (run against the user's real obs-v2)
 
-#### 5. `integrity` — `tests/data-integrity.test.ts`
+#### 7. `integrity` — `tests/data-integrity.test.ts`
 
-Schema + value invariants over the live `obs.db`. **44 assertions.**
+Schema + value invariants over the live `obs.db`. **49 assertions.**
 Found and fixed 1 real bug on its first run.
 
 - **Whole-table sanity**: no NULLs in non-nullable columns; `node_type
@@ -204,11 +276,15 @@ Found and fixed 1 real bug on its first run.
 - **HTTP API consistency** (when service up): `/api/sessions` totals
   match SQL; `/api/summary tools` count matches SQL aggregate;
   `/healthz steps` matches SQL.
+- **Round 6 Context Length live invariants**: for up to 5 sample runs,
+  asserts `frameworkBaseline + Σ Δᵢ == totalLatest` (the
+  `getContextBreakdown` sanity invariant) and
+  `timeline.cumulative.peakInputTokens == MAX(input_tokens)` from SQL.
 
-#### 6. `live-e2e` — `tests/live-e2e.test.ts`
+#### 8. `live-e2e` — `tests/live-e2e.test.ts`
 
 End-to-end correctness against the user's actual production sessions.
-**14 assertions.**
+**17 assertions.**
 
 - Picks the top 3 non-cron sessions by current step count, locates each
   underlying transcript via `ingest_state`, clean-parses it, and
@@ -223,8 +299,11 @@ End-to-end correctness against the user's actual production sessions.
   into their matching toolCall in the trace view), every span's `id`
   exists in obs.db as an assistant row, `GET /api/summary` `runs`
   matches `COUNT(DISTINCT run_id)`.
+- **Round 6**: spawns `observ_cli.ts status` against the live obs.db
+  via child_process, asserts exit 0 and output contains the expected
+  `service` / `db` lines.
 
-#### 7. `replay` — `tests/replay-verify.ts`
+#### 9. `replay` — `tests/replay-verify.ts`
 
 For every transcript file that currently exists on disk, clean-parse it
 from scratch with the current parser and compare per-`run_id` step counts
@@ -243,7 +322,7 @@ DROPPED runs whose source-file mtime is within `RACE_MTIME_GRACE_MS`
 (8 s) of "now" are forgiven as live-write races. There is no per-run
 cap, so N concurrent active sessions all race-forgiven correctly.
 
-#### 8. `cross-check` — `tests/cross-check-official.ts`
+#### 10. `cross-check` — `tests/cross-check-official.ts`
 
 The **ground truth** suite. Runs `openclaw sessions --all-agents --active
 N --json` and diffs `input_tokens`, `output_tokens`, `total_tokens` against
@@ -254,7 +333,7 @@ the concrete enforcement of constitution §1.3.1 ("主表数值必须与 OpenCla
 Has a `--retry-wait 35` option: if the first pass sees a mismatch, sleep
 past one auth-poll cycle and re-check. Only fail if drift persists.
 
-#### 9. `perf` — `tests/perf-bench.ts`
+#### 11. `perf` — `tests/perf-bench.ts`
 
 Wall-clock + CPU budget for the hot paths. Current measurements on a
 ~22 000-step DB:
