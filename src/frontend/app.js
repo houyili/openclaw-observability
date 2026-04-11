@@ -381,18 +381,13 @@ async function refreshHealth() {
     const d = await res.json();
     const ind = document.getElementById('refresh-indicator');
     if (!ind) return;
-    const poll = d.authPoll || {};
-    if (poll.stale) {
-      const age = poll.lastSuccessAgeMs != null
-        ? `${Math.round(poll.lastSuccessAgeMs / 1000)}s`
-        : 'never';
-      const err = poll.lastError ? ` — ${String(poll.lastError).slice(0, 60)}` : '';
-      ind.textContent = `⚠ auth-poll stale (${age})${err}`;
-      ind.className = 'stale';
-    } else {
-      ind.textContent = '● auto-refresh 5s';
-      ind.className = '';
-    }
+    // Pure mapping lives in health-indicator.js so the same function can be
+    // unit-tested from Node (see tests/auth-stale.test.ts).
+    const out = window.computeRefreshIndicator
+      ? window.computeRefreshIndicator(d)
+      : { text: '● auto-refresh 5s', className: '' };
+    ind.textContent = out.text;
+    ind.className = out.className;
   } catch { /* swallow */ }
 }
 

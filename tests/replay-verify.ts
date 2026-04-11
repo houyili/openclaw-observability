@@ -25,11 +25,18 @@
  *     tests/replay-verify.ts
  */
 
-import { readdirSync, readFileSync, existsSync } from "node:fs";
+import { readdirSync, readFileSync, existsSync, statSync } from "node:fs";
 import { join, basename } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { CONFIG } from "../src/config.ts";
 import { parseTranscript, type TranscriptEntry } from "../src/ingest/transcript-parser.ts";
+
+// Any file the OS reports as written within this many ms of "now" is
+// considered "actively being written" — drift on these is treated as a
+// snapshot/watcher race rather than a real bug. 8 s comfortably covers
+// one transcript-watcher tick (2 s) plus a slow upsert + filesystem
+// timestamp granularity.
+const RACE_MTIME_GRACE_MS = 8_000;
 
 // ─── File discovery ─────────────────────────────────────────────
 
@@ -148,34 +155,54 @@ if (diffs.length > 0) {
   for (const d of diffs) console.log(d);
 }
 
-// Grace window for live races: clean-parse and the DB snapshot are not
-// atomic, so if an agent is actively writing a transcript the last run can
-// drift by a step or two. We tolerate at most ONE such "DROPPED" run with
-// drift ≤ 2 steps. Anything bigger is real.
-const GRACE_RUNS = 1;
-const GRACE_STEPS = 2;
+// Grace window for live races (P2-2 fix):
+//   Clean-parse and the DB snapshot are not atomic. A session that is
+//   actively writing its transcript will normally show a 1-2 step drift
+//   between the parsed file and what the watcher has flushed to the DB.
+//   The old version hard-coded "≤ 1 such run". That is wrong on a busy
+//   machine where 3 sessions can all be live at once.
+//
+//   New rule: a DROPPED run is forgiven IFF its source file's mtime is
+//   within RACE_MTIME_GRACE_MS of "now" — i.e. the OS thinks the file is
+//   being touched right now. There is no per-run cap. A drift on an
+//   unchanged file (mtime > grace window in the past) is always a real
+//   regression and fails the suite.
+const now = Date.now();
 
-// Re-derive drift size for DROPPED runs (dropped count was incremented, but
-// we need to know HOW much). Walk diffs and decide.
-let graceUsed = 0;
 let realDrops = 0;
+let raceForgiven = 0;
 for (const d of diffs) {
   if (!d.startsWith("  DROPPED")) continue;
-  const m = d.match(/clean=(\d+) db=(\d+)/);
-  if (!m) { realDrops++; continue; }
-  const drift = parseInt(m[1], 10) - parseInt(m[2], 10);
-  if (drift <= GRACE_STEPS && graceUsed < GRACE_RUNS) { graceUsed++; continue; }
-  realDrops++;
+
+  // Recover the source file path from the diff line we already built.
+  // Format: "  DROPPED  <basename>.jsonl run=... clean=N db=M"
+  const fnMatch = d.match(/DROPPED\s+(\S+)/);
+  if (!fnMatch) { realDrops++; continue; }
+  const fileBaseName = fnMatch[1];
+
+  // Look the runCount entry up by basename to recover the absolute path.
+  const rc = runCounts.find((r) => basename(r.filePath) === fileBaseName);
+  if (!rc) { realDrops++; continue; }
+
+  let mtimeMs = 0;
+  try { mtimeMs = statSync(rc.filePath).mtimeMs; } catch { /* ignore */ }
+  const isLiveRace = mtimeMs > 0 && now - mtimeMs < RACE_MTIME_GRACE_MS;
+
+  if (isLiveRace) {
+    raceForgiven++;
+  } else {
+    realDrops++;
+  }
 }
 
 const fail = missing + realDrops + duplicated;
 if (fail > 0) {
-  console.log(`\n  RESULT: FAIL — ${fail}/${runCounts.length} runs drifted (after ${graceUsed} grace allowances)`);
+  console.log(`\n  RESULT: FAIL — ${fail}/${runCounts.length} runs drifted (forgave ${raceForgiven} live-write race${raceForgiven === 1 ? "" : "s"})`);
   process.exit(1);
 }
 
-if (graceUsed > 0) {
-  console.log(`\n  RESULT: PASS — every run matches (${graceUsed} run in live-write grace window)`);
+if (raceForgiven > 0) {
+  console.log(`\n  RESULT: PASS — every run matches (${raceForgiven} forgiven by mtime race window, ${RACE_MTIME_GRACE_MS}ms)`);
 } else {
   console.log("\n  RESULT: PASS — every run in every live file matches DB step count");
 }

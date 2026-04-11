@@ -3,10 +3,22 @@
 #
 #   unit         — existing tool/error/parser unit tests (run-tests.ts)
 #   invariants   — parser correctness invariants (parser-invariants.test.ts)
+#   fixture      — hermetic fixture ingest end-to-end (fixture-ingest.test.ts)
+#   auth-stale   — /healthz + frontend pill under broken openclaw CLI
+#                  (auth-stale.test.ts)
 #   replay       — clean-room reparse vs live obs.db aggregates (replay-verify.ts)
 #   cross-check  — obs.db sessions vs `openclaw sessions --json` (cross-check-official.ts)
+#   perf         — wall-clock + CPU budgets for hot paths (perf-bench.ts)
 #
-# Use TEST_FILTER env var to run a subset:  TEST_FILTER=invariants ./run-all.sh
+# Hermetic suites (no live obs-v2 service or live transcripts needed):
+#   unit, invariants, fixture, auth-stale
+#
+# Live suites (need a running obs-v2 + ~/.openclaw/agents/*.jsonl):
+#   replay, cross-check, perf
+#
+# Use TEST_FILTER env var to run a subset:
+#   TEST_FILTER=invariants                       ./run-all.sh
+#   TEST_FILTER="unit invariants fixture auth-stale" ./run-all.sh   # CI / clean-clone
 #
 # Exit 0 = all passed; non-zero = at least one suite failed.
 
@@ -17,7 +29,7 @@ NODE_BIN="${NODE_BIN:-$HOME/.local/bin/node}"
 [ -x "$NODE_BIN" ] || NODE_BIN="node"
 NODE_FLAGS="--experimental-sqlite --experimental-strip-types --no-warnings"
 
-FILTER="${TEST_FILTER:-unit invariants replay cross-check perf}"
+FILTER="${TEST_FILTER:-unit invariants fixture auth-stale replay cross-check perf}"
 
 total_fail=0
 run_suite() {
@@ -40,6 +52,8 @@ run_suite() {
 
 run_suite "unit"        "tests/run-tests.ts"
 run_suite "invariants"  "tests/parser-invariants.test.ts"
+run_suite "fixture"     "tests/fixture-ingest.test.ts"
+run_suite "auth-stale"  "tests/auth-stale.test.ts"
 run_suite "replay"      "tests/replay-verify.ts"
 run_suite "cross-check" "tests/cross-check-official.ts"
 run_suite "perf"        "tests/perf-bench.ts"

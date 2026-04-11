@@ -8,8 +8,11 @@
     "start": "node --experimental-sqlite --experimental-strip-types --no-warnings src/index.ts",
     "dev": "node --experimental-sqlite --experimental-strip-types --watch --no-warnings src/index.ts",
     "test": "./tests/run-all.sh",
+    "test:hermetic": "TEST_FILTER='unit invariants fixture auth-stale' ./tests/run-all.sh",
     "test:unit": "node --experimental-sqlite --experimental-strip-types --no-warnings tests/run-tests.ts",
     "test:invariants": "node --experimental-sqlite --experimental-strip-types --no-warnings tests/parser-invariants.test.ts",
+    "test:fixture": "node --experimental-sqlite --experimental-strip-types --no-warnings tests/fixture-ingest.test.ts",
+    "test:auth-stale": "node --experimental-sqlite --experimental-strip-types --no-warnings tests/auth-stale.test.ts",
     "test:replay": "node --experimental-sqlite --experimental-strip-types --no-warnings tests/replay-verify.ts",
     "test:cross-check": "node --experimental-sqlite --experimental-strip-types --no-warnings tests/cross-check-official.ts",
     "test:perf": "node --experimental-sqlite --experimental-strip-types --no-warnings tests/perf-bench.ts"
