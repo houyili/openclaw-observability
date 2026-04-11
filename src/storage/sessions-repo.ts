@@ -79,6 +79,14 @@ export function recomputeAllSessionCounts(): void {
  * Recompute session counts from the steps table (idempotent, safe on restart).
  * Accepts either a base key or a :run:UUID variant; always aggregates against
  * the base key and fans the result out to all matching sessions rows.
+ *
+ * Round 5 fix: only flip `source = 'transcript+auth'` when the aggregate
+ * actually found at least one step. The previous version flipped source
+ * unconditionally, which left orphan rows in the form
+ *   { source: 'transcript+auth', llm/tool/skill/mcp counts all 0 }
+ * for any session whose only transcript content was a user message with
+ * no assistant response (e.g. a subagent that was spawned but never ran).
+ * Now matches the gating in `recomputeAllSessionCounts`.
  */
 export function recomputeSessionCounts(sessionKey: string): void {
   const db = getDb();
@@ -88,16 +96,21 @@ export function recomputeSessionCounts(sessionKey: string): void {
       SUM(CASE WHEN node_type = 'MODEL_THINK' THEN 1 ELSE 0 END) as llm,
       SUM(CASE WHEN role = 'assistant' AND node_type NOT IN ('MODEL_THINK','REPLY') THEN 1 ELSE 0 END) as tool,
       SUM(CASE WHEN skill_name IS NOT NULL AND role = 'assistant' THEN 1 ELSE 0 END) as skill,
-      SUM(CASE WHEN mcp_tool IS NOT NULL AND role = 'assistant' THEN 1 ELSE 0 END) as mcp
+      SUM(CASE WHEN mcp_tool IS NOT NULL AND role = 'assistant' THEN 1 ELSE 0 END) as mcp,
+      COUNT(*) as total
     FROM steps WHERE session_key = ?
   `).get(baseKey) as any;
   if (!row) return;
   db.prepare(`
     UPDATE sessions SET
       llm_call_count = ?, tool_call_count = ?, skill_call_count = ?, mcp_call_count = ?,
-      source = 'transcript+auth'
+      source = CASE WHEN ? > 0 THEN 'transcript+auth' ELSE source END
     WHERE session_key = ? OR session_key LIKE ?
-  `).run(row.llm || 0, row.tool || 0, row.skill || 0, row.mcp || 0, baseKey, baseKey + ":run:%");
+  `).run(
+    row.llm || 0, row.tool || 0, row.skill || 0, row.mcp || 0,
+    row.total || 0,
+    baseKey, baseKey + ":run:%",
+  );
 }
 
 export function updateSessionLabel(sessionKey: string, label: string): void {

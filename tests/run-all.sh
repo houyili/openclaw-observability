@@ -1,20 +1,24 @@
 #!/usr/bin/env bash
 # Runs the full observability-v2 test suite.
 #
-#   unit         — existing tool/error/parser unit tests (run-tests.ts)
-#   invariants   — parser correctness invariants (parser-invariants.test.ts)
-#   fixture      — hermetic fixture ingest end-to-end (fixture-ingest.test.ts)
-#   auth-stale   — /healthz + frontend pill under broken openclaw CLI
-#                  (auth-stale.test.ts)
-#   replay       — clean-room reparse vs live obs.db aggregates (replay-verify.ts)
-#   cross-check  — obs.db sessions vs `openclaw sessions --json` (cross-check-official.ts)
-#   perf         — wall-clock + CPU budgets for hot paths (perf-bench.ts)
+#   unit           — existing tool/error/parser unit tests (run-tests.ts)
+#   invariants     — parser correctness invariants (parser-invariants.test.ts)
+#   fixture        — hermetic fixture ingest end-to-end (fixture-ingest.test.ts)
+#   auth-stale     — /healthz + frontend pill under broken openclaw CLI
+#                    (auth-stale.test.ts)
+#   integrity      — schema + value invariants over LIVE obs.db
+#                    (data-integrity.test.ts)
+#   live-e2e       — top-N live sessions: transcript → clean parse → DB
+#                    → openclaw CLI → HTTP API end-to-end (live-e2e.test.ts)
+#   replay         — clean-room reparse vs live obs.db aggregates (replay-verify.ts)
+#   cross-check    — obs.db sessions vs `openclaw sessions --json` (cross-check-official.ts)
+#   perf           — wall-clock + CPU budgets for hot paths (perf-bench.ts)
 #
 # Hermetic suites (no live obs-v2 service or live transcripts needed):
 #   unit, invariants, fixture, auth-stale
 #
-# Live suites (need a running obs-v2 + ~/.openclaw/agents/*.jsonl):
-#   replay, cross-check, perf
+# Live suites (need a running obs-v2 + ~/.openclaw/agents/<agent>/sessions/):
+#   integrity, live-e2e, replay, cross-check, perf
 #
 # Use TEST_FILTER env var to run a subset:
 #   TEST_FILTER=invariants                       ./run-all.sh
@@ -29,7 +33,7 @@ NODE_BIN="${NODE_BIN:-$HOME/.local/bin/node}"
 [ -x "$NODE_BIN" ] || NODE_BIN="node"
 NODE_FLAGS="--experimental-sqlite --experimental-strip-types --no-warnings"
 
-FILTER="${TEST_FILTER:-unit invariants fixture auth-stale replay cross-check perf}"
+FILTER="${TEST_FILTER:-unit invariants fixture auth-stale integrity live-e2e replay cross-check perf}"
 
 total_fail=0
 run_suite() {
@@ -54,6 +58,8 @@ run_suite "unit"        "tests/run-tests.ts"
 run_suite "invariants"  "tests/parser-invariants.test.ts"
 run_suite "fixture"     "tests/fixture-ingest.test.ts"
 run_suite "auth-stale"  "tests/auth-stale.test.ts"
+run_suite "integrity"   "tests/data-integrity.test.ts"
+run_suite "live-e2e"    "tests/live-e2e.test.ts"
 run_suite "replay"      "tests/replay-verify.ts"
 run_suite "cross-check" "tests/cross-check-official.ts"
 run_suite "perf"        "tests/perf-bench.ts"

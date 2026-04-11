@@ -13,6 +13,8 @@
     "test:invariants": "node --experimental-sqlite --experimental-strip-types --no-warnings tests/parser-invariants.test.ts",
     "test:fixture": "node --experimental-sqlite --experimental-strip-types --no-warnings tests/fixture-ingest.test.ts",
     "test:auth-stale": "node --experimental-sqlite --experimental-strip-types --no-warnings tests/auth-stale.test.ts",
+    "test:integrity": "node --experimental-sqlite --experimental-strip-types --no-warnings tests/data-integrity.test.ts",
+    "test:live-e2e": "node --experimental-sqlite --experimental-strip-types --no-warnings tests/live-e2e.test.ts",
     "test:replay": "node --experimental-sqlite --experimental-strip-types --no-warnings tests/replay-verify.ts",
     "test:cross-check": "node --experimental-sqlite --experimental-strip-types --no-warnings tests/cross-check-official.ts",
     "test:perf": "node --experimental-sqlite --experimental-strip-types --no-warnings tests/perf-bench.ts"

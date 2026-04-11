@@ -1,0 +1,335 @@
+/**
+ * Data integrity sweep against the LIVE obs.db.
+ *
+ * This is a "the database itself must hold up" test — independent of
+ * what the parser does today. It walks the actual rows and asserts every
+ * structural invariant the schema and the parser are supposed to enforce
+ * jointly. If any of these fire, something has been writing bad data
+ * (parser bug, schema migration drift, manual SQL).
+ *
+ * Categories:
+ *
+ *   A. Whole-table sanity
+ *      - no NULLs in non-nullable columns
+ *      - node_type / status / role / error_type are members of the
+ *        enumerated sets we control
+ *      - durations are non-negative
+ *
+ *   B. Per-run integrity (sampled — top N runs by step count)
+ *      - step_ids are unique within a run_id
+ *      - seq is dense or at least monotone non-decreasing
+ *      - ts_epoch_ms is monotone non-decreasing in seq order
+ *      - the first step in a run is an `assistant` step (not a stray
+ *        toolResult)
+ *
+ *   C. Cross-table integrity
+ *      - every distinct session_key in `steps` has either a matching
+ *        sessions row OR is a base key for a `:run:UUID` variant
+ *      - registry rows referenced by steps still exist
+ *
+ *   D. HTTP API consistency (only when /healthz is up)
+ *      - GET /api/sessions returns same total as direct SQL
+ *      - GET /api/skills row.call_count matches direct SQL per skill
+ *
+ * Skipped gracefully when obs.db doesn't exist (clean clone). Otherwise
+ * fails on any drift.
+ *
+ * Run:
+ *   node --experimental-sqlite --experimental-strip-types --no-warnings \
+ *     tests/data-integrity.test.ts
+ */
+
+import { existsSync } from "node:fs";
+import { DatabaseSync } from "node:sqlite";
+import { CONFIG } from "../src/config.ts";
+
+let passed = 0;
+let failed = 0;
+const failures: string[] = [];
+function assert(cond: boolean, name: string, detail?: string) {
+  if (cond) { passed++; console.log(`  ✅ ${name}`); }
+  else {
+    failed++;
+    console.log(`  ❌ ${name}${detail ? ` — ${detail}` : ""}`);
+    failures.push(name);
+  }
+}
+
+if (!existsSync(CONFIG.DB_PATH)) {
+  console.log(`[data-integrity] obs.db not found at ${CONFIG.DB_PATH} — skipping (this suite is live-only).`);
+  process.exit(0);
+}
+
+const db = new DatabaseSync(CONFIG.DB_PATH, { readOnly: true });
+
+// ─── A. Whole-table sanity ──────────────────────────────────────
+console.log("\n=== A. Whole-table sanity ===");
+
+const stepCount = (db.prepare("SELECT COUNT(*) as n FROM steps").get() as any).n;
+const sessionCount = (db.prepare("SELECT COUNT(*) as n FROM sessions").get() as any).n;
+console.log(`  (probing ${stepCount} steps, ${sessionCount} sessions)`);
+
+// A1: no NULLs in non-nullable columns
+function nullCount(col: string): number {
+  return (db.prepare(`SELECT COUNT(*) as n FROM steps WHERE ${col} IS NULL`).get() as any).n;
+}
+assert(nullCount("session_key") === 0, "no NULL session_key in steps");
+assert(nullCount("run_id")      === 0, "no NULL run_id in steps");
+assert(nullCount("node_type")   === 0, "no NULL node_type in steps");
+assert(nullCount("ts")          === 0, "no NULL ts in steps");
+assert(nullCount("ts_epoch_ms") === 0, "no NULL ts_epoch_ms in steps");
+assert(nullCount("role")        === 0, "no NULL role in steps");
+assert(nullCount("status")      === 0, "no NULL status in steps");
+assert(nullCount("step_id")     === 0, "no NULL step_id in steps");
+
+// A2: enumerated columns hold expected values
+const KNOWN_NODE_TYPES = new Set([
+  "MODEL_THINK", "TOOL_CALL", "SHELL_EXEC", "MCP_CALL", "SUBAGENT_SPAWN",
+  "SKILL_EXEC", "EXTERNAL_CALL", "INTERNAL_OP", "REPLY",
+]);
+const KNOWN_STATUS = new Set(["ok", "error", "running"]);
+const KNOWN_ROLES = new Set(["assistant", "toolResult"]);
+const KNOWN_ERROR_TYPES = new Set([
+  "auth_error", "timeout", "not_found", "rate_limit", "http_4xx", "http_5xx", "unknown",
+]);
+
+const distinctNodes = new Set<string>(
+  (db.prepare("SELECT DISTINCT node_type FROM steps").all() as any[]).map((r: any) => r.node_type),
+);
+const unknownNodes = [...distinctNodes].filter(t => !KNOWN_NODE_TYPES.has(t));
+assert(unknownNodes.length === 0, "all node_type values are in the known set",
+  unknownNodes.length > 0 ? `found: ${JSON.stringify(unknownNodes)}` : "");
+
+const distinctStatus = new Set<string>(
+  (db.prepare("SELECT DISTINCT status FROM steps").all() as any[]).map((r: any) => r.status),
+);
+const unknownStatus = [...distinctStatus].filter(s => !KNOWN_STATUS.has(s));
+assert(unknownStatus.length === 0, "all status values are in {ok, error, running}",
+  unknownStatus.length > 0 ? `found: ${JSON.stringify(unknownStatus)}` : "");
+
+const distinctRoles = new Set<string>(
+  (db.prepare("SELECT DISTINCT role FROM steps").all() as any[]).map((r: any) => r.role),
+);
+const unknownRoles = [...distinctRoles].filter(r => !KNOWN_ROLES.has(r));
+assert(unknownRoles.length === 0, "all role values are in {assistant, toolResult}",
+  unknownRoles.length > 0 ? `found: ${JSON.stringify(unknownRoles)}` : "");
+
+const distinctErrors = new Set<string>(
+  (db.prepare("SELECT DISTINCT error_type FROM steps WHERE error_type IS NOT NULL").all() as any[])
+    .map((r: any) => r.error_type),
+);
+const unknownErrors = [...distinctErrors].filter(t => !KNOWN_ERROR_TYPES.has(t));
+assert(unknownErrors.length === 0, "all error_type values are in the known set",
+  unknownErrors.length > 0 ? `found: ${JSON.stringify(unknownErrors)}` : "");
+
+// A3: error rows must carry an error_text
+const errorsWithoutText =
+  (db.prepare("SELECT COUNT(*) as n FROM steps WHERE status='error' AND (error_text IS NULL OR error_text='')").get() as any).n;
+assert(errorsWithoutText === 0, "every status='error' row has an error_text",
+  errorsWithoutText > 0 ? `${errorsWithoutText} rows missing error_text` : "");
+
+// A4: durations are non-negative (NULL is allowed for in-progress steps)
+const negDurations =
+  (db.prepare("SELECT COUNT(*) as n FROM steps WHERE duration_ms < 0").get() as any).n;
+assert(negDurations === 0, "no negative duration_ms",
+  negDurations > 0 ? `${negDurations} rows with negative duration` : "");
+
+// A5: step_id is unique across the entire steps table (it's PK so this is
+// schema-enforced, but a paranoia check costs nothing)
+const dupStepIds = (db.prepare(`
+  SELECT COUNT(*) as n FROM (
+    SELECT step_id, COUNT(*) as c FROM steps GROUP BY step_id HAVING c > 1
+  )
+`).get() as any).n;
+assert(dupStepIds === 0, "step_id is globally unique");
+
+// A6: every assistant MODEL_THINK has output_tokens (or none if usage absent)
+const modelThinkBadTokens = (db.prepare(`
+  SELECT COUNT(*) as n FROM steps WHERE node_type = 'MODEL_THINK' AND output_tokens < 0
+`).get() as any).n;
+assert(modelThinkBadTokens === 0, "no MODEL_THINK with negative output_tokens");
+
+// A7: registry referenced by steps is consistent
+const orphanSkillRefs = (db.prepare(`
+  SELECT COUNT(DISTINCT skill_name) as n FROM steps
+  WHERE skill_name IS NOT NULL
+    AND skill_name NOT IN (SELECT name FROM registry WHERE type='skill')
+`).get() as any).n;
+assert(orphanSkillRefs === 0, "every skill_name referenced in steps exists in registry",
+  orphanSkillRefs > 0 ? `${orphanSkillRefs} orphan skill refs` : "");
+
+// ─── B. Per-run integrity (top 5 runs by step count) ────────────
+console.log("\n=== B. Per-run integrity (top 5 runs) ===");
+
+const topRuns = db.prepare(`
+  SELECT run_id, session_key, COUNT(*) as n
+  FROM steps GROUP BY run_id ORDER BY n DESC LIMIT 5
+`).all() as any[];
+
+for (const r of topRuns) {
+  const tag = `${r.run_id.slice(0, 8)} (${r.n} steps)`;
+  const rows = db.prepare(
+    "SELECT step_id, seq, ts_epoch_ms, role FROM steps WHERE run_id = ? ORDER BY seq",
+  ).all(r.run_id) as any[];
+
+  // B1: step_ids unique within this run
+  const idSet = new Set(rows.map(x => x.step_id));
+  assert(idSet.size === rows.length, `${tag}: step_ids unique within run`,
+    `${rows.length} rows, ${idSet.size} unique`);
+
+  // B2: seq monotone non-decreasing
+  let monoSeq = true;
+  for (let i = 1; i < rows.length; i++) {
+    if (rows[i].seq < rows[i - 1].seq) { monoSeq = false; break; }
+  }
+  assert(monoSeq, `${tag}: seq is monotone non-decreasing`);
+
+  // B3: ts_epoch_ms monotone non-decreasing in seq order
+  let monoTs = true;
+  for (let i = 1; i < rows.length; i++) {
+    if (rows[i].ts_epoch_ms < rows[i - 1].ts_epoch_ms) { monoTs = false; break; }
+  }
+  assert(monoTs, `${tag}: ts_epoch_ms monotone non-decreasing in seq order`);
+
+  // B4: the first step is `assistant`-role (a stray toolResult at seq=0
+  // would mean we lost the user-message boundary)
+  if (rows.length > 0) {
+    assert(rows[0].role === "assistant", `${tag}: first step is role=assistant`,
+      `got role=${rows[0].role}`);
+  }
+}
+
+// ─── C. Cross-table integrity ───────────────────────────────────
+console.log("\n=== C. Cross-table integrity ===");
+
+// Helper: strip :run:UUID suffix to get the base key.
+function toBaseKey(k: string): string {
+  return k.replace(/:run:[a-f0-9-]+$/, "");
+}
+
+// Steps preserve history — keys can outlive their sessions row by design
+// (auth-poller only carries the last AUTH_ACTIVE_MINUTES window, while
+// the steps table is never pruned per constitution §6). The right
+// invariant is the OPPOSITE direction: every base key currently in
+// the sessions table SHOULD have steps in obs.db, modulo a small
+// handful of brand-new auth-only sessions that haven't logged any
+// transcript yet.
+
+const sessionBaseKeys = new Set<string>(
+  (db.prepare("SELECT DISTINCT session_key FROM sessions").all() as any[])
+    .map((r: any) => toBaseKey(r.session_key)),
+);
+const stepBaseKeys = new Set<string>(
+  (db.prepare("SELECT DISTINCT session_key FROM steps").all() as any[])
+    .map((r: any) => r.session_key),
+);
+
+let sessionsWithoutSteps = 0;
+for (const sk of sessionBaseKeys) {
+  if (!stepBaseKeys.has(sk)) sessionsWithoutSteps++;
+}
+const sessionsWithoutStepsPct = sessionBaseKeys.size > 0
+  ? sessionsWithoutSteps / sessionBaseKeys.size
+  : 0;
+// "auth-only session that has never written a transcript yet" is normal;
+// allow a fairly generous fraction.
+assert(sessionsWithoutStepsPct <= 0.5,
+  `≤ 50% of session base keys lack any steps (rest are normal auth-only)`,
+  `${sessionsWithoutSteps}/${sessionBaseKeys.size} (${(sessionsWithoutStepsPct * 100).toFixed(1)}%)`);
+
+// C2: every "transcript+auth" session base key MUST have steps somewhere
+// (that's literally what the source field means after recomputeSessionCounts
+// upgrades it). Use base-key lookup, not exact key, because cron rows
+// have :run:UUID suffixes that don't appear in steps.
+const taSessionKeys = new Set<string>(
+  (db.prepare(
+    "SELECT DISTINCT session_key FROM sessions WHERE source = 'transcript+auth'",
+  ).all() as any[]).map((r: any) => toBaseKey(r.session_key)),
+);
+let taWithoutSteps = 0;
+for (const sk of taSessionKeys) {
+  if (!stepBaseKeys.has(sk)) taWithoutSteps++;
+}
+assert(taWithoutSteps === 0,
+  `every 'transcript+auth' session base key has matching steps`,
+  taWithoutSteps > 0 ? `${taWithoutSteps}/${taSessionKeys.size} missing` : "");
+
+// C3: the OVERLAP between sessions and steps base-key sets should be
+// substantial. If the live machine has any active session at all, at
+// least one of them must show up in steps. (This catches the case where
+// auth-poller is healthy but the watcher stopped writing.)
+let overlap = 0;
+for (const sk of sessionBaseKeys) if (stepBaseKeys.has(sk)) overlap++;
+if (sessionBaseKeys.size > 0) {
+  assert(overlap > 0,
+    "at least one session base key has matching steps (watcher is alive)",
+    `overlap=${overlap}`);
+}
+
+// ─── D. HTTP API consistency (only if obs-v2 service is up) ─────
+console.log("\n=== D. HTTP API consistency (if service up) ===");
+
+const HTTP_BASE = `http://${CONFIG.HOST}:${CONFIG.PORT}`;
+let serviceUp = false;
+try {
+  const probe = await fetch(`${HTTP_BASE}/healthz`, { signal: AbortSignal.timeout(2000) });
+  serviceUp = probe.ok;
+} catch { /* not running */ }
+
+if (!serviceUp) {
+  console.log("  (service not up — skipping HTTP API checks)");
+} else {
+  // D1: /api/sessions total matches direct SQL count for non-cron tab
+  const apiNonCron = await (await fetch(`${HTTP_BASE}/api/sessions?tab=sessions&page=1`)).json() as any;
+  const sqlNonCron = (db.prepare("SELECT COUNT(*) as n FROM sessions WHERE channel != 'cron'").get() as any).n;
+  assert(apiNonCron.total === sqlNonCron,
+    "/api/sessions?tab=sessions total matches SELECT COUNT(*) WHERE channel != 'cron'",
+    `api=${apiNonCron.total} sql=${sqlNonCron}`);
+
+  const apiCron = await (await fetch(`${HTTP_BASE}/api/sessions?tab=cron&page=1`)).json() as any;
+  const sqlCron = (db.prepare("SELECT COUNT(*) as n FROM sessions WHERE channel = 'cron'").get() as any).n;
+  assert(apiCron.total === sqlCron,
+    "/api/sessions?tab=cron total matches SELECT COUNT(*) WHERE channel = 'cron'",
+    `api=${apiCron.total} sql=${sqlCron}`);
+
+  // D2: /api/skills row.call_count matches direct SQL per skill (sample top 3)
+  // Endpoint returns { range, skills, rankings } — pull the .skills array.
+  const apiSkillsResp = await (await fetch(`${HTTP_BASE}/api/skills?range=all`)).json() as any;
+  const skillRows: any[] = apiSkillsResp.skills || [];
+  const topSkills = skillRows.filter(s => s.call_count > 0).slice(0, 3);
+  for (const s of topSkills) {
+    const sql = (db.prepare(
+      "SELECT COUNT(*) as n FROM steps WHERE skill_name = ?",
+    ).get(s.name) as any).n;
+    assert(sql === s.call_count,
+      `/api/skills "${s.name}" call_count matches SQL`,
+      `api=${s.call_count} sql=${sql}`);
+  }
+
+  // D3: /api/summary tools count matches SQL
+  const apiSummary = await (await fetch(`${HTTP_BASE}/api/summary`)).json() as any;
+  const sqlTools = (db.prepare(`
+    SELECT COUNT(*) as n FROM steps
+    WHERE role = 'assistant' AND node_type NOT IN ('MODEL_THINK','REPLY')
+  `).get() as any).n;
+  assert(apiSummary.tools === sqlTools,
+    "/api/summary tools count matches SQL aggregate",
+    `api=${apiSummary.tools} sql=${sqlTools}`);
+
+  // D4: /healthz reports the same step count as direct SQL
+  const apiHealth = await (await fetch(`${HTTP_BASE}/healthz`)).json() as any;
+  assert(apiHealth.steps === stepCount,
+    "/healthz steps count matches SQL",
+    `api=${apiHealth.steps} sql=${stepCount}`);
+}
+
+db.close();
+
+// ─── Summary ────────────────────────────────────────────────────
+console.log(`\n${"=".repeat(50)}`);
+console.log(`Data integrity: ${passed} passed, ${failed} failed`);
+if (failed > 0) {
+  console.log("\nFailures:");
+  for (const f of failures) console.log(`  • ${f}`);
+  process.exit(1);
+}

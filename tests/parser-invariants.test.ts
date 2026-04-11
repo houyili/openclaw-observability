@@ -189,6 +189,169 @@ console.log("\n=== Error propagation ===");
     `got ${call?.errorType}`);
 }
 
+// ─── 7. Step ordering + uniqueness within a run ─────────────────
+console.log("\n=== Step ordering + uniqueness ===");
+{
+  // A 4-tool-call run with mixed result timing — exercises seq density
+  // and step_id uniqueness.
+  const entries: TranscriptEntry[] = [
+    { type: "message", id: "u1", parentId: "", timestamp: ts("2026-04-01T00:00:00Z"),
+      message: { role: "user", content: [{ type: "text", text: "do four things" }] } },
+    { type: "message", id: "a1", parentId: "u1", timestamp: ts("2026-04-01T00:00:03Z"),
+      message: { role: "assistant", content: [
+        { type: "thinking" },
+        { type: "toolCall", name: "read",  id: "tcA", arguments: { file_path: "/tmp/A" } },
+        { type: "toolCall", name: "read",  id: "tcB", arguments: { file_path: "/tmp/B" } },
+        { type: "toolCall", name: "read",  id: "tcC", arguments: { file_path: "/tmp/C" } },
+        { type: "toolCall", name: "read",  id: "tcD", arguments: { file_path: "/tmp/D" } },
+      ], usage: { input: 100, output: 80, totalTokens: 180 } } },
+    { type: "message", id: "rA", parentId: "a1", timestamp: ts("2026-04-01T00:00:04Z"),
+      message: { role: "toolResult", content: [{ type: "text", text: "A" }] } },
+    { type: "message", id: "rB", parentId: "rA", timestamp: ts("2026-04-01T00:00:05Z"),
+      message: { role: "toolResult", content: [{ type: "text", text: "B" }] } },
+    { type: "message", id: "rC", parentId: "rB", timestamp: ts("2026-04-01T00:00:06Z"),
+      message: { role: "toolResult", content: [{ type: "text", text: "C" }] } },
+    { type: "message", id: "rD", parentId: "rC", timestamp: ts("2026-04-01T00:00:07Z"),
+      message: { role: "toolResult", content: [{ type: "text", text: "D" }] } },
+  ];
+  const run = parseTranscript(entries, "key")[0];
+
+  // 7a: seq is dense and increasing (0..n-1)
+  const seqs = run.steps.map(s => s.seq);
+  const seqOk = seqs.every((v, i) => v === i);
+  assert(seqOk, "seq is dense 0..n-1 across the run", `got ${JSON.stringify(seqs)}`);
+
+  // 7b: step_ids are globally unique within the run
+  const ids = run.steps.map(s => s.stepId);
+  const idSet = new Set(ids);
+  assert(idSet.size === ids.length, "step_ids are unique within a run",
+    `${ids.length} steps, ${idSet.size} unique`);
+
+  // 7c: ts_epoch_ms is non-decreasing in seq order
+  let mono = true;
+  for (let i = 1; i < run.steps.length; i++) {
+    if (run.steps[i].tsEpochMs < run.steps[i - 1].tsEpochMs) { mono = false; break; }
+  }
+  assert(mono, "ts_epoch_ms is non-decreasing in seq order");
+
+  // 7d: every duration is non-negative
+  const allNonNeg = run.steps.every(s => (s.durationMs ?? 0) >= 0);
+  assert(allNonNeg, "all step durations are non-negative");
+
+  // 7e: per-tool token approximation sums to assistant.output_tokens (within
+  // rounding). Each of 4 tool calls gets floor(80/4) = 20.
+  const toolSum = run.steps
+    .filter(s => s.toolName === "read")
+    .reduce((n, s) => n + (s.outputTokens ?? 0), 0);
+  assert(toolSum === 80,
+    "sum of per-tool output_tokens equals assistant.usage.output (no rounding loss for 80/4)",
+    `got ${toolSum}`);
+
+  // 7f: 4 calls × FIFO matching → durations 1s,2s,3s,4s respectively
+  const calls = run.steps.filter(s => s.toolName === "read");
+  const durs = calls.map(s => s.durationMs);
+  assert(JSON.stringify(durs) === JSON.stringify([1000, 2000, 3000, 4000]),
+    "FIFO assigns durations in issuance order: 1s/2s/3s/4s",
+    `got ${JSON.stringify(durs)}`);
+}
+
+// ─── 8. Per-tool token rounding behavior ────────────────────────
+console.log("\n=== Per-tool token rounding ===");
+{
+  // 7 output tokens / 3 tool calls → Math.round(7/3) = 2 each → sum = 6
+  // (off by 1 from the original 7). Documents the known approximation.
+  const entries: TranscriptEntry[] = [
+    { type: "message", id: "u1", parentId: "", timestamp: ts("2026-04-01T00:00:00Z"),
+      message: { role: "user", content: [{ type: "text", text: "three" }] } },
+    { type: "message", id: "a1", parentId: "u1", timestamp: ts("2026-04-01T00:00:03Z"),
+      message: { role: "assistant", content: [
+        { type: "toolCall", name: "read", id: "tcA", arguments: {} },
+        { type: "toolCall", name: "read", id: "tcB", arguments: {} },
+        { type: "toolCall", name: "read", id: "tcC", arguments: {} },
+      ], usage: { input: 100, output: 7, totalTokens: 107 } } },
+  ];
+  const steps = parseTranscript(entries, "key")[0].steps;
+  const tokens = steps.filter(s => s.toolName === "read").map(s => s.outputTokens);
+  // Math.round(7/3) = 2 → all three get 2 → sum = 6
+  assert(tokens.every(t => t === 2),
+    "round(7/3) = 2 — every parallel call gets the same approximation",
+    `got ${JSON.stringify(tokens)}`);
+  // Document the known drift: per-step sum is allowed to differ from
+  // assistant.usage.output by up to (toolCalls.length - 1) tokens.
+  const sum = tokens.reduce((a, b) => (a ?? 0) + (b ?? 0), 0);
+  const drift = Math.abs((sum ?? 0) - 7);
+  assert(drift <= 2, "rounding drift bounded by toolCalls.length - 1",
+    `drift=${drift}`);
+}
+
+// ─── 9. Empty assistant (no thinking, no tools, no text) ────────
+console.log("\n=== Edge case: empty assistant message ===");
+{
+  // An assistant message with literally nothing actionable should not crash
+  // the parser and should not emit phantom steps.
+  const entries: TranscriptEntry[] = [
+    { type: "message", id: "u1", parentId: "", timestamp: ts("2026-04-01T00:00:00Z"),
+      message: { role: "user", content: [{ type: "text", text: "ping" }] } },
+    { type: "message", id: "a1", parentId: "u1", timestamp: ts("2026-04-01T00:00:01Z"),
+      message: { role: "assistant", content: [], usage: { input: 50, output: 0, totalTokens: 50 } } },
+  ];
+  const run = parseTranscript(entries, "key")[0];
+  assert(run.steps.length === 0, "empty assistant message produces zero steps",
+    `got ${run.steps.length}`);
+  assert(run.totalTokens === 50, "totalTokens still tracks usage even with no steps");
+}
+
+// ─── 10. Assistant with thinking but no tools and no text ───────
+console.log("\n=== Edge case: thinking-only assistant ===");
+{
+  const entries: TranscriptEntry[] = [
+    { type: "message", id: "u1", parentId: "", timestamp: ts("2026-04-01T00:00:00Z"),
+      message: { role: "user", content: [{ type: "text", text: "ponder" }] } },
+    { type: "message", id: "a1", parentId: "u1", timestamp: ts("2026-04-01T00:00:05Z"),
+      message: { role: "assistant", content: [
+        { type: "thinking" },
+      ], usage: { input: 100, output: 30, totalTokens: 130 } } },
+  ];
+  const run = parseTranscript(entries, "key")[0];
+  // hasThinking || toolCalls.length > 0 → true → MODEL_THINK is created
+  // hasText && toolCalls.length === 0 → false (no text) → no REPLY
+  assert(run.steps.length === 1, "thinking-only emits exactly one MODEL_THINK step",
+    `got ${run.steps.length}`);
+  assert(run.steps[0].nodeType === "MODEL_THINK", "the lone step is MODEL_THINK");
+}
+
+// ─── 11. Truncated transcript (entries before any user message) ─
+console.log("\n=== Edge case: orphan entries before first user ===");
+{
+  // Common case for the watcher when it picks up a transcript mid-stream
+  // and the incremental boundary lands inside a run. Round 2 made the
+  // watcher always full-reparse, but the parser's defensive drop-before-
+  // user behavior is still required and must not crash.
+  const entries: TranscriptEntry[] = [
+    // No user message — these are orphaned
+    { type: "message", id: "a-orphan", parentId: "?", timestamp: ts("2026-04-01T00:00:01Z"),
+      message: { role: "assistant", content: [{ type: "text", text: "stray" }],
+                 usage: { input: 10, output: 5, totalTokens: 15 } } },
+    { type: "message", id: "r-orphan", parentId: "a-orphan", timestamp: ts("2026-04-01T00:00:02Z"),
+      message: { role: "toolResult", content: [{ type: "text", text: "stray result" }] } },
+    // Now a real user message — a run finally starts
+    { type: "message", id: "u1", parentId: "", timestamp: ts("2026-04-01T00:00:10Z"),
+      message: { role: "user", content: [{ type: "text", text: "real query" }] } },
+    { type: "message", id: "a1", parentId: "u1", timestamp: ts("2026-04-01T00:00:12Z"),
+      message: { role: "assistant", content: [{ type: "text", text: "real answer" }],
+                 usage: { input: 20, output: 8, totalTokens: 28 } } },
+  ];
+  const runs = parseTranscript(entries, "key");
+  assert(runs.length === 1, "orphaned entries do not create a run; only the real user starts one",
+    `got ${runs.length}`);
+  assert(runs[0].runId === "u1", "the only run is rooted at the real user message");
+  // Run should contain only the real assistant message's REPLY (no tool, no
+  // thinking → just REPLY)
+  assert(runs[0].steps.length === 1, "real run has 1 step (REPLY)",
+    `got ${runs[0].steps.length}`);
+  assert(runs[0].steps[0].nodeType === "REPLY", "the only step is REPLY");
+}
+
 // ─── Summary ────────────────────────────────────────────────────
 console.log(`\n${"=".repeat(50)}`);
 console.log(`Parser invariants: ${passed} passed, ${failed} failed`);
