@@ -323,6 +323,62 @@ if (!serviceUp) {
     `api=${apiHealth.steps} sql=${stepCount}`);
 }
 
+// ─── E. Round 6 — Context Length sanity invariants on LIVE data ──
+// For up to 5 sample runs that have ≥ 2 MODEL_THINK rows, verify
+// `frameworkBaseline + Σ Δ == totalLatest` and that the timeline's
+// peak input matches MAX(input_tokens).
+console.log("\n=== E. Round 6: Context Length live invariants ===");
+{
+  const { getContextBreakdown, getContextTimeline } = await import("../src/storage/context-repo.ts");
+
+  // Find runs that have at least 2 MODEL_THINK rows AND a populated input_tokens
+  const sampleRuns = db.prepare(`
+    SELECT session_key, run_id, COUNT(*) as n
+    FROM steps
+    WHERE node_type = 'MODEL_THINK' AND input_tokens IS NOT NULL
+    GROUP BY session_key, run_id
+    HAVING n >= 2
+    ORDER BY n DESC LIMIT 5
+  `).all() as Array<{ session_key: string; run_id: string; n: number }>;
+
+  if (sampleRuns.length === 0) {
+    // First-tick reparse hasn't backfilled yet — that's OK on a freshly
+    // restarted obs-v2. Don't fail the suite, just note it.
+    console.log("  (no runs with input_tokens populated yet — backfill pending)");
+  }
+
+  for (const r of sampleRuns) {
+    const tag = `${r.session_key.slice(0, 50)} run=${r.run_id.slice(0, 8)}`;
+
+    const breakdown = getContextBreakdown(r.session_key, r.run_id);
+    if (!breakdown) {
+      assert(false, `${tag}: getContextBreakdown returned a result`);
+      continue;
+    }
+    const sumDelta = breakdown.turns
+      .slice(1)
+      .reduce((s, t) => s + (t.deltaFromPrev || 0), 0);
+    const recomputed = breakdown.frameworkBaseline + sumDelta;
+    assert(recomputed === breakdown.totalLatest,
+      `${tag}: baseline + Σ Δ == totalLatest`,
+      `${breakdown.frameworkBaseline} + ${sumDelta} = ${recomputed}, expected ${breakdown.totalLatest}`);
+
+    const timeline = getContextTimeline(r.session_key, r.run_id);
+    if (!timeline) {
+      assert(false, `${tag}: getContextTimeline returned a result`);
+      continue;
+    }
+
+    const dbPeak = (db.prepare(`
+      SELECT MAX(input_tokens) as p FROM steps
+      WHERE session_key = ? AND run_id = ? AND input_tokens IS NOT NULL
+    `).get(r.session_key, r.run_id) as any).p;
+    assert(timeline.cumulative.peakInputTokens === dbPeak,
+      `${tag}: timeline peakInputTokens == MAX(input_tokens)`,
+      `timeline=${timeline.cumulative.peakInputTokens} db=${dbPeak}`);
+  }
+}
+
 db.close();
 
 // ─── Summary ────────────────────────────────────────────────────

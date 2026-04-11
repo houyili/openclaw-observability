@@ -117,6 +117,10 @@ export function startServer(): void {
         const key = decodeURIComponent(path.slice("/api/sessions/".length, -"/trace".length));
         return handleSessionsRoutes.trace(key, query, res, sendJson);
       }
+      if (path.startsWith("/api/sessions/") && path.endsWith("/context")) {
+        const key = decodeURIComponent(path.slice("/api/sessions/".length, -"/context".length));
+        return handleSessionsRoutes.context(key, query, res, sendJson);
+      }
       if (path.startsWith("/api/sessions/")) {
         const key = decodeURIComponent(path.slice("/api/sessions/".length));
         return handleSessionsRoutes.detail(key, res, sendJson);

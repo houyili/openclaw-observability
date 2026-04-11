@@ -352,6 +352,88 @@ console.log("\n=== Edge case: orphan entries before first user ===");
   assert(runs[0].steps[0].nodeType === "REPLY", "the only step is REPLY");
 }
 
+// ─── 12. Round 6 — new ParsedStep fields populated correctly ────
+console.log("\n=== Round 6: input_tokens / cache_read / thinking / reply text ===");
+{
+  // Hand-crafted transcript: 1 user, 2 assistant turns. The first
+  // assistant has thinking + tool call; the second has thinking + text reply.
+  const entries: TranscriptEntry[] = [
+    { type: "message", id: "u1", parentId: "", timestamp: ts("2026-04-11T00:00:00Z"),
+      message: { role: "user", content: [{ type: "text", text: "go" }] } },
+    { type: "message", id: "a1", parentId: "u1", timestamp: ts("2026-04-11T00:00:05Z"),
+      message: { role: "assistant", content: [
+        { type: "thinking", text: "let me read the file first" },  // 26 chars
+        { type: "toolCall", name: "read", id: "tcA", arguments: { file_path: "/tmp/x" } },
+      ], usage: { input: 1500, output: 80, cacheRead: 1200, totalTokens: 2780 } } },
+    { type: "message", id: "rA", parentId: "a1", timestamp: ts("2026-04-11T00:00:07Z"),
+      message: { role: "toolResult", content: [{ type: "text", text: "file body" }] } },
+    { type: "message", id: "a2", parentId: "rA", timestamp: ts("2026-04-11T00:00:10Z"),
+      message: { role: "assistant", content: [
+        { type: "thinking", text: "ok the answer is" },             // 16 chars
+        { type: "text", text: "Here is your answer in 19 chars." }, // 32 chars
+      ], usage: { input: 1700, output: 30, cacheRead: 1500, totalTokens: 3230 } } },
+  ];
+  const run = parseTranscript(entries, "key")[0];
+
+  // 12a — MODEL_THINK on a1 carries usage.input
+  const think1 = run.steps.find((s) => s.nodeType === "MODEL_THINK" && s.stepId === "a1");
+  assert(think1?.inputTokens === 1500, "MODEL_THINK.inputTokens == usage.input on first assistant",
+    `got ${think1?.inputTokens}`);
+
+  // 12b — MODEL_THINK on a1 carries usage.cacheRead
+  assert(think1?.cacheReadTokens === 1200, "MODEL_THINK.cacheReadTokens == usage.cacheRead",
+    `got ${think1?.cacheReadTokens}`);
+
+  // 12c — thinking_text_len matches the sum of thinking block char lengths
+  assert(think1?.thinkingTextLen === 26, "MODEL_THINK.thinkingTextLen == thinking block chars (26)",
+    `got ${think1?.thinkingTextLen}`);
+
+  // 12d — tool_call rows do NOT carry input_tokens (per-tool input is not knowable)
+  const toolCallRow = run.steps.find((s) => s.toolName === "read");
+  assert(toolCallRow?.inputTokens === undefined,
+    "tool_call rows do not carry inputTokens (per-tool input is not knowable from API)");
+
+  // 12e — REPLY row carries usage.input + cacheRead
+  const reply = run.steps.find((s) => s.nodeType === "REPLY");
+  assert(reply?.inputTokens === 1700, "REPLY.inputTokens == second assistant usage.input",
+    `got ${reply?.inputTokens}`);
+  assert(reply?.cacheReadTokens === 1500, "REPLY.cacheReadTokens == second assistant usage.cacheRead",
+    `got ${reply?.cacheReadTokens}`);
+
+  // 12f — REPLY.replyTextLen captures FULL text length (not the 200-char preview)
+  assert(reply?.replyTextLen === 32, "REPLY.replyTextLen == full text content length (32)",
+    `got ${reply?.replyTextLen}`);
+
+  // 12g — REPLY does NOT carry thinkingTextLen when its MODEL_THINK
+  // companion already captured the same chars (avoids double-counting
+  // in cumulative aggregates).
+  assert(reply?.thinkingTextLen === undefined,
+    "REPLY.thinkingTextLen is undefined when MODEL_THINK companion exists",
+    `got ${reply?.thinkingTextLen}`);
+
+  // 12h — A text-only assistant (no thinking) produces ONLY a REPLY
+  // (no MODEL_THINK companion). The REPLY captures inputTokens and
+  // is the sole anchor for that turn.
+  const textOnlyEntries: TranscriptEntry[] = [
+    { type: "message", id: "u9", parentId: "", timestamp: ts("2026-04-11T01:00:00Z"),
+      message: { role: "user", content: [{ type: "text", text: "ping" }] } },
+    { type: "message", id: "a9", parentId: "u9", timestamp: ts("2026-04-11T01:00:01Z"),
+      message: { role: "assistant", content: [
+        { type: "text", text: "pong" },
+      ], usage: { input: 500, output: 5, cacheRead: 100, totalTokens: 605 } } },
+  ];
+  const textOnlyRun = parseTranscript(textOnlyEntries, "k");
+  assert(textOnlyRun[0].steps.length === 1,
+    "text-only assistant produces 1 step (REPLY only, no MODEL_THINK)",
+    `got ${textOnlyRun[0].steps.length}`);
+  assert(textOnlyRun[0].steps[0].nodeType === "REPLY",
+    "the only step is REPLY");
+  assert(textOnlyRun[0].steps[0].inputTokens === 500,
+    "text-only REPLY carries usage.input");
+  assert(textOnlyRun[0].steps[0].replyTextLen === 4,
+    "text-only REPLY carries replyTextLen=4 ('pong')");
+}
+
 // ─── Summary ────────────────────────────────────────────────────
 console.log(`\n${"=".repeat(50)}`);
 console.log(`Parser invariants: ${passed} passed, ${failed} failed`);

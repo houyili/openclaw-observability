@@ -14,6 +14,7 @@ let currentSubTab = 'sessions'; // 'sessions' (non-cron) or 'cron'
 let currentPage = 1;
 let expandedSessionKey = null;
 let selectedRunId = null; // null = latest run
+let currentDetailView = 'trace'; // Round 6: 'trace' | 'context'
 
 // ─── Tab switching ──────────────────────────────────────────────
 document.querySelectorAll('button.tab').forEach(btn => {
@@ -188,17 +189,59 @@ async function refreshSessions() {
 
 window.toggleSession = async function(key) {
   const detail = document.getElementById('session-detail');
-  if (expandedSessionKey === key) { expandedSessionKey = null; selectedRunId = null; detail.classList.add('hidden'); return; }
+  if (expandedSessionKey === key) {
+    expandedSessionKey = null;
+    selectedRunId = null;
+    currentDetailView = 'trace';
+    detail.classList.add('hidden');
+    return;
+  }
   expandedSessionKey = key;
   selectedRunId = null;
+  currentDetailView = 'trace';
   detail.classList.remove('hidden');
-  await refreshTrace(key);
+  await refreshDetail(key);
 };
 
 window.selectRun = function(runId) {
   selectedRunId = runId || null;
-  if (expandedSessionKey) refreshTrace(expandedSessionKey);
+  if (expandedSessionKey) refreshDetail(expandedSessionKey);
 };
+
+// Round 6 — switch between Workflow trace view and Context length view
+window.selectDetailView = function(view) {
+  if (view !== 'trace' && view !== 'context') return;
+  currentDetailView = view;
+  if (expandedSessionKey) refreshDetail(expandedSessionKey);
+};
+
+async function refreshDetail(key) {
+  if (currentDetailView === 'context') return refreshContext(key);
+  return refreshTrace(key);
+}
+
+function renderViewSelector(activeView) {
+  return `<div class="view-selector">
+    <button class="view-item${activeView === 'trace' ? ' view-active' : ''}" onclick="selectDetailView('trace')">Workflow trace</button>
+    <button class="view-item${activeView === 'context' ? ' view-active' : ''}" onclick="selectDetailView('context')">Context length</button>
+  </div>`;
+}
+
+function renderRunSelector(runs, activeRunId) {
+  if (!runs || runs.length <= 1) return '';
+  let html = '<div class="run-selector">';
+  html += `<span class="run-selector-label">Runs (${runs.length}):</span>`;
+  html += '<div class="run-list">';
+  for (const r of runs) {
+    const isActive = r.runId === activeRunId;
+    const time = new Date(r.startedAt).toLocaleTimeString();
+    const durStr = fmtDur(r.durationMs);
+    const stepsStr = `${r.modelSteps}m+${r.toolSteps}t`;
+    html += `<button class="run-item${isActive ? ' run-active' : ''}" onclick="selectRun('${esc(r.runId)}')">${time} (${durStr}, ${stepsStr})${r.status === 'running' ? ' ●' : ''}</button>`;
+  }
+  html += '</div></div>';
+  return html;
+}
 
 async function refreshTrace(key) {
   const detail = document.getElementById('session-detail');
@@ -208,21 +251,7 @@ async function refreshTrace(key) {
   const spans = data.spans || [];
   const runs = data.runs || [];
 
-  // Run selector
-  let html = '<div class="run-selector">';
-  if (runs.length > 1) {
-    html += `<span class="run-selector-label">Runs (${runs.length}):</span>`;
-    html += '<div class="run-list">';
-    for (const r of runs) {
-      const isActive = r.runId === data.runId;
-      const time = new Date(r.startedAt).toLocaleTimeString();
-      const durStr = fmtDur(r.durationMs);
-      const stepsStr = `${r.modelSteps}m+${r.toolSteps}t`;
-      html += `<button class="run-item${isActive ? ' run-active' : ''}" onclick="selectRun('${esc(r.runId)}')">${time} (${durStr}, ${stepsStr})${r.status === 'running' ? ' ●' : ''}</button>`;
-    }
-    html += '</div>';
-  }
-  html += '</div>';
+  let html = renderViewSelector('trace') + renderRunSelector(runs, data.runId);
 
   if (!spans.length) { detail.innerHTML = html + '<div class="trace-header">No trace data for this run</div>'; return; }
 
@@ -279,6 +308,161 @@ function getDepth(span, spans) {
   let d = 0, cur = span;
   while (cur.parentId) { const p = spans.find(s => s.id === cur.parentId); if (!p) break; d++; cur = p; }
   return d;
+}
+
+// ─── Round 6 — Context Length view ──────────────────────────────
+
+async function refreshContext(key) {
+  const detail = document.getElementById('session-detail');
+  const runParam = selectedRunId ? `&runId=${encodeURIComponent(selectedRunId)}` : '';
+  const res = await authFetch(`/api/sessions/${encodeURIComponent(key)}/context?${runParam}`);
+  if (!res.ok) {
+    detail.innerHTML = renderViewSelector('context') + '<div class="trace-header">No context data for this run</div>';
+    return;
+  }
+  const data = await res.json();
+  const runs = data.runs || [];
+  const breakdown = data.breakdown;
+  const timeline = data.timeline;
+  if (!breakdown || !timeline) {
+    detail.innerHTML = renderViewSelector('context') + renderRunSelector(runs, data.runId)
+      + '<div class="trace-header">No context data for this run</div>';
+    return;
+  }
+  detail.innerHTML = renderViewSelector('context') + renderRunSelector(runs, data.runId)
+    + renderContextView(breakdown, timeline);
+}
+
+function renderContextView(breakdown, timeline) {
+  const peakInput = timeline.cumulative.peakInputTokens || 1;
+  const totalLatest = breakdown.totalLatest || peakInput;
+  const buckets = breakdown.buckets;
+
+  // Coarse 5-bucket bars (% of totalLatest, clamped 0-100)
+  const bucketRows = [
+    { name: 'Framework baseline', value: buckets.frameworkBaseline,        cls: 'bucket-baseline' },
+    { name: 'Assistant outputs',  value: buckets.assistantOutputsCumulative, cls: 'bucket-output' },
+    { name: 'Tool result inflow', value: buckets.toolResultsCumulative,    cls: 'bucket-tool'    },
+    { name: 'MCP context inflow', value: buckets.mcpDeltasCumulative,      cls: 'bucket-mcp'     },
+    { name: 'Unaccounted',        value: buckets.unaccountedCumulative,    cls: 'bucket-unacc'   },
+  ];
+
+  let html = '<div class="context-view">';
+
+  // Header — current context
+  html += `<div class="context-header">
+    <div class="context-header-title">
+      <strong>Context:</strong> ${fmtTok(totalLatest)} of latest assistant input
+      ${timeline.loopFlags.healthVerdict !== 'healthy' ? `<span class="context-loop-warn">⚠ ${timeline.loopFlags.healthVerdict}</span>` : ''}
+    </div>
+    <div class="context-header-meta">
+      Run ${esc(breakdown.runId.slice(0,8))} ·
+      ${timeline.cumulative.totalTurns} turns ·
+      peak ${fmtTok(peakInput)} ·
+      cache hit ${timeline.cumulative.cacheHitRate != null ? (timeline.cumulative.cacheHitRate * 100).toFixed(0) + '%' : '—'}
+    </div>
+  </div>`;
+
+  // Coarse bucket bars
+  html += '<div class="context-bucket-grid">';
+  for (const b of bucketRows) {
+    const pct = totalLatest > 0 ? Math.max(0, Math.min(100, (Math.abs(b.value) / totalLatest) * 100)) : 0;
+    const pctStr = totalLatest > 0 ? (b.value / totalLatest * 100).toFixed(1) : '0.0';
+    html += `<div class="context-bucket-row">
+      <div class="context-bucket-label">${b.name}</div>
+      <div class="context-bucket-value">${fmtTok(b.value)}</div>
+      <div class="context-bucket-bar"><div class="context-bucket-fill ${b.cls}" style="width:${pct.toFixed(1)}%"></div></div>
+      <div class="context-bucket-pct">${pctStr}%</div>
+    </div>`;
+  }
+  html += '</div>';
+
+  // Insight banner (server-computed)
+  if (timeline.insightBanner) {
+    html += `<div class="context-insight">⚠ ${esc(timeline.insightBanner)}</div>`;
+  }
+
+  // Per-turn timeline table (postmortem-style)
+  html += `<div class="context-section-title">Per-turn timeline</div>`;
+  html += '<div class="context-turn-table-wrap"><table class="context-turn-table">';
+  html += '<thead><tr><th>Turn</th><th>Tool</th><th>Δin</th><th>in</th><th>cR</th><th>out</th><th>prevTR</th><th>think</th><th>note</th></tr></thead><tbody>';
+  for (const t of timeline.turns) {
+    const deltaCls = t.deltaIn == null ? '' : (t.deltaIn > 5000 ? 'delta-spike' : (t.deltaIn < 0 ? 'delta-neg' : ''));
+    const deltaStr = t.deltaIn == null ? '—' : (t.deltaIn >= 0 ? '+' : '') + t.deltaIn.toLocaleString();
+    const toolStr = t.primaryTool || (t.replyTextChars > 0 ? '(reply)' : '(think)');
+    const note = t.deltaIn == null ? 'baseline' :
+      (t.deltaIn > 5000 ? '⚡ spike' : '');
+    html += `<tr>
+      <td>${t.seq}</td>
+      <td class="mono">${esc(toolStr)}</td>
+      <td class="mono ${deltaCls}">${deltaStr}</td>
+      <td class="mono">${t.inputTokens.toLocaleString()}</td>
+      <td class="mono">${t.cacheReadTokens.toLocaleString()}</td>
+      <td class="mono">${t.outputTokens.toLocaleString()}</td>
+      <td class="mono">${t.prevToolResultChars > 0 ? t.prevToolResultChars.toLocaleString() : '—'}</td>
+      <td class="mono">${t.thinkingChars > 0 ? t.thinkingChars.toLocaleString() : '—'}</td>
+      <td>${esc(note)}</td>
+    </tr>`;
+  }
+  html += '</tbody></table></div>';
+
+  // Phase strip
+  if (timeline.phases.length > 0) {
+    html += `<div class="context-section-title">Phases</div><div class="context-phase-strip">`;
+    const totalSeqs = Math.max(1, timeline.turns.length);
+    for (const p of timeline.phases) {
+      const startIdx = timeline.turns.findIndex(t => t.seq === p.startSeq);
+      const endIdx = timeline.turns.findIndex(t => t.seq === p.endSeq);
+      const span = (endIdx - startIdx + 1) || 1;
+      const widthPct = (span / totalSeqs * 100).toFixed(1);
+      html += `<div class="context-phase phase-${p.name}" style="width:${widthPct}%" title="${esc(p.note)}">
+        <span class="context-phase-name">${p.name}</span>
+      </div>`;
+    }
+    html += '</div>';
+  }
+
+  // Top spikes
+  if (timeline.topSpikes.length > 0) {
+    html += `<div class="context-section-title">Top single-point spikes</div><div class="context-spikes">`;
+    for (let i = 0; i < timeline.topSpikes.length; i++) {
+      const s = timeline.topSpikes[i];
+      html += `<div class="context-spike-row">
+        <span class="context-spike-rank">#${i+1}</span>
+        <span class="mono">+${s.deltaIn.toLocaleString()}</span>
+        <span>turn ${s.seq}</span>
+        <span>${esc(s.triggerSummary)}</span>
+      </div>`;
+    }
+    html += '</div>';
+  }
+
+  // Cumulative aggregates
+  const cum = timeline.cumulative;
+  html += `<div class="context-section-title">Cumulative</div>
+    <div class="context-cumulative-grid">
+      <div><span>output tokens</span><b>${cum.totalOutputTokens.toLocaleString()}</b></div>
+      <div><span>tool_result chars</span><b>${cum.totalToolResultChars.toLocaleString()}</b></div>
+      <div><span>thinking chars</span><b>${cum.totalThinkingChars.toLocaleString()}</b></div>
+      <div><span>toolCall args chars</span><b>${cum.totalToolCallArgsChars.toLocaleString()}</b></div>
+      <div><span>reply text chars</span><b>${cum.totalReplyTextChars.toLocaleString()}</b></div>
+      <div><span>peak input</span><b>${cum.peakInputTokens.toLocaleString()}</b></div>
+      <div><span>cache hit rate</span><b>${cum.cacheHitRate != null ? (cum.cacheHitRate * 100).toFixed(0) + '%' : '—'}</b></div>
+      <div><span>consec. no-write</span><b>${timeline.loopFlags.consecutiveNoWriteTurns}</b></div>
+      <div><span>health verdict</span><b class="verdict-${timeline.loopFlags.healthVerdict}">${timeline.loopFlags.healthVerdict}</b></div>
+    </div>`;
+
+  // Repeated file reads (if any)
+  if (timeline.loopFlags.repeatedFileReads.length > 0) {
+    html += `<div class="context-section-title">Repeatedly read files</div><div class="context-repeated-reads">`;
+    for (const r of timeline.loopFlags.repeatedFileReads.slice(0, 8)) {
+      html += `<div class="context-repeated-row"><span class="mono">${r.readCount}×</span> <span class="mono">${esc(r.filePath)}</span></div>`;
+    }
+    html += '</div>';
+  }
+
+  html += '</div>'; // close .context-view
+  return html;
 }
 
 // ─── Rankings renderer ──────────────────────────────────────────

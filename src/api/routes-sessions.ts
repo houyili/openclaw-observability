@@ -1,6 +1,7 @@
 import type { ServerResponse } from "node:http";
 import { getAllSessions, getSession } from "../storage/sessions-repo.ts";
 import { getLatestRun, getRunList, getTraceSpans, getActivityBars } from "../storage/steps-repo.ts";
+import { getContextBreakdown, getContextTimeline } from "../storage/context-repo.ts";
 
 type SendJson = (res: ServerResponse, data: unknown, status?: number) => void;
 
@@ -160,6 +161,42 @@ export const handleSessionsRoutes = {
       startedAt: (spans[0] as any).ts,
       traceDurationMs: adjustedMaxEnd,
       spans: mappedSpans,
+      runs: runs.map(r => ({
+        runId: r.run_id,
+        startedAt: r.started_at,
+        durationMs: r.duration_ms,
+        modelSteps: r.model_steps,
+        toolSteps: r.tool_steps,
+        status: r.status,
+      })),
+    });
+  },
+
+  /**
+   * Round 6 — §1.2 #16 Context Length analysis.
+   *
+   * Returns BOTH the coarse 5-bucket breakdown and the fine-grained
+   * per-turn timeline (phases, top-N spikes, cumulative aggregates,
+   * death-loop heuristics) for one session+run. The frontend renders
+   * a single panel with all of it stacked.
+   *
+   *   GET /api/sessions/:key/context?runId=<optional>
+   *   → 200 { sessionKey, runId, breakdown, timeline, runs }
+   *   → 404 if no MODEL_THINK rows
+   */
+  context(key: string, query: Record<string, string>, res: ServerResponse, sendJson: SendJson) {
+    const breakdown = getContextBreakdown(key, query.runId);
+    if (!breakdown) {
+      return sendJson(res, { error: "No assistant turns found for this run" }, 404);
+    }
+    const timeline = getContextTimeline(key, query.runId);
+    const runs = getRunList(key);
+
+    sendJson(res, {
+      sessionKey: key,
+      runId: breakdown.runId,
+      breakdown,
+      timeline,
       runs: runs.map(r => ({
         runId: r.run_id,
         startedAt: r.started_at,

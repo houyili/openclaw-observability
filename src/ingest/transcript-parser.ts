@@ -47,6 +47,13 @@ export interface ParsedStep {
   durationMs?: number;
   totalTokens?: number;
   outputTokens?: number;
+  // Round 6 — fine-grained Context Length view fields. Set on
+  // MODEL_THINK and REPLY rows (the assistant rows that carry a `usage`
+  // block); NULL on tool_call and toolResult rows.
+  inputTokens?: number;       // usage.input
+  cacheReadTokens?: number;   // usage.cacheRead
+  thinkingTextLen?: number;   // chars in content[].type='thinking' on this assistant
+  replyTextLen?: number;      // chars in content[].type='text' on REPLY rows only
   inputTextLen?: number;
   resultTextLen?: number;
   contextTokenDelta?: number;
@@ -134,6 +141,21 @@ function parseAssistantContent(
   const hasThinking = content.some((c: any) => c.type === "thinking");
   const tsMs = new Date(entry.timestamp).getTime();
 
+  // Round 6 — char counts of the assistant message's own thinking and
+  // text content. These power the fine-grained Context Length view.
+  const thinkingTextLen = content
+    .filter((c: any) => c.type === "thinking")
+    .reduce((n: number, c: any) => n + (typeof c.text === "string" ? c.text.length : 0), 0);
+  const replyTextLen = content
+    .filter((c: any) => c.type === "text")
+    .reduce((n: number, c: any) => n + (typeof c.text === "string" ? c.text.length : 0), 0);
+  // Round 6 — surface usage.input and usage.cacheRead (the parser used to
+  // discard cacheRead). These are required for the Context view's per-turn
+  // Δin / cR columns. Both are optional — providers that don't expose them
+  // (e.g. mocks in unit tests) leave the fields undefined.
+  const usageInputTokens = msg.usage?.input;
+  const usageCacheReadTokens = msg.usage?.cacheRead;
+
   // MODEL_THINK step
   if (hasThinking || toolCalls.length > 0) {
     steps.push({
@@ -146,6 +168,9 @@ function parseAssistantContent(
       nodeType: "MODEL_THINK",
       totalTokens: msg.usage?.totalTokens,
       outputTokens: msg.usage?.output,
+      inputTokens: usageInputTokens,
+      cacheReadTokens: usageCacheReadTokens,
+      thinkingTextLen: thinkingTextLen || undefined,
       status: "ok",
       isStuck: false,
       isCurrent: false,
@@ -200,6 +225,17 @@ function parseAssistantContent(
       nodeType: "REPLY",
       totalTokens: msg.usage?.totalTokens,
       outputTokens: msg.usage?.output,
+      // Round 6 — same per-turn token + char surfaces as MODEL_THINK,
+      // plus the FULL reply text length (the existing 200-char preview
+      // is intentionally a preview and is kept for the trace view).
+      // thinkingTextLen is NOT stored on REPLY when a MODEL_THINK
+      // companion was already created for the same assistant message
+      // (i.e. hasThinking is true), since both rows would otherwise
+      // double-count the same chars in cumulative sums.
+      inputTokens: usageInputTokens,
+      cacheReadTokens: usageCacheReadTokens,
+      thinkingTextLen: hasThinking ? undefined : (thinkingTextLen || undefined),
+      replyTextLen: replyTextLen || undefined,
       resultPreview: textBlock?.text?.slice(0, 200),
       status: "ok",
       isStuck: false,

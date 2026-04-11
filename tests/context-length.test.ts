@@ -1,0 +1,439 @@
+/**
+ * Round 6 — Context Length view (§1.2 #16) hermetic test suite.
+ *
+ * Six layers, all driven by hand-derived synthetic transcripts so every
+ * expected number is mechanically computable on a whiteboard:
+ *
+ *   1. Schema migration is idempotent
+ *   2. Parser populates the 4 new fields exactly
+ *   3. getContextBreakdown (coarse 5-bucket) per-turn + bucket totals
+ *      + sanity invariant `baseline + Σ Δ == totalLatest`
+ *   4. getContextTimeline per-turn rows + cumulative aggregates
+ *   5. Death-loop heuristic detection (stuck vs healthy)
+ *   6. HTTP API roundtrip via in-process startServer
+ *
+ * Hermetic via OPENCLAW_HOME=$tmpdir override (same pattern as
+ * fixture-ingest.test.ts).
+ */
+
+import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+
+let passed = 0;
+let failed = 0;
+const failures: string[] = [];
+function assert(cond: boolean, name: string, detail?: string) {
+  if (cond) { passed++; console.log(`  ✅ ${name}`); }
+  else {
+    failed++;
+    console.log(`  ❌ ${name}${detail ? ` — ${detail}` : ""}`);
+    failures.push(name);
+  }
+}
+
+// ─── Set up an isolated $OPENCLAW_HOME BEFORE any obs-v2 import ─
+const tmpHome = mkdtempSync(join(tmpdir(), "obs-context-length-"));
+mkdirSync(join(tmpHome, "logs/observability-v2"), { recursive: true });
+process.env.OPENCLAW_HOME = tmpHome;
+process.env.OBS_AUTH_TOKEN = ""; // disable auth for the in-process HTTP test
+
+const { parseTranscript } = await import("../src/ingest/transcript-parser.ts");
+const { upsertSteps } = await import("../src/storage/steps-repo.ts");
+const { getDb, closeDb } = await import("../src/storage/db.ts");
+const { getContextBreakdown, getContextTimeline } = await import("../src/storage/context-repo.ts");
+
+// ─── Group 1: Schema migration is idempotent ────────────────────
+console.log("\n=== Group 1: Schema migration ===");
+{
+  const db = getDb();
+  const cols = db.prepare("PRAGMA table_info(steps)").all() as Array<{ name: string }>;
+  const want = ["input_tokens", "cache_read_tokens", "thinking_text_len", "reply_text_len"];
+  for (const w of want) {
+    assert(cols.some((c) => c.name === w), `column ${w} present after migrate()`);
+  }
+
+  // Re-run migrate by closing + re-opening — must not throw
+  closeDb();
+  const db2 = getDb();
+  const cols2 = db2.prepare("PRAGMA table_info(steps)").all() as Array<{ name: string }>;
+  assert(cols2.length === cols.length, "second migrate() does not change column count");
+}
+
+// ─── Build a synthetic 4-turn run with KNOWN token math ─────────
+//
+// Turn 0: a0 — usage.input=10000  output=200  cacheRead=0   thinking=10
+// Turn 1: a1 — usage.input=11500  output=180  cacheRead=10000 thinking=13
+//   prevToolResults: 1 result of 1200 chars (300 tokens) from a0's read
+//   tool call. a1's tool call is feishu_search_doc_wiki (MCP_CALL),
+//   so the parser sets a1's tool_call row's context_token_delta =
+//   a1.input - a0.input = 1500. getTurnMcpDelta(turn 1) sums
+//   context_token_delta of MCP_CALL rows in a1's assistantRows = 1500.
+//     priorOutput contribution: 200
+//     toolResultsCharApprox: 1200/4 = 300
+//     mcpDelta: 1500
+//     Δin = 1500
+//     unaccounted = 1500 - 200 - 300 - 1500 = -500
+// Turn 2: a2 — usage.input=12300  output=80   cacheRead=11500 thinking=10
+//   prevToolResults: 1 result of 800 chars (200 tokens) from a1's MCP call
+//   a2's tool call is `read` (TOOL_CALL, not MCP_CALL), no contextTokenDelta
+//     priorOutput: 180
+//     toolResults: 200
+//     mcpDelta: 0
+//     Δin = 800
+//     unaccounted = 800 - 180 - 200 - 0 = 420
+// Turn 3: a3 — MODEL_THINK + REPLY, input=12500 output=50 cacheRead=12300
+//   thinking=5 replyText=120. Both rows are folded into 1 turn by
+//   groupTurns (Round 6 fix).
+//     priorOutput: 80
+//     toolResults: 0 (r2 was empty)
+//     mcpDelta: 0
+//     Δin = 200
+//     unaccounted = 200 - 80 - 0 - 0 = 120
+
+const sessionKey = "agent:test:context";
+const fixtureEntries: any[] = [
+  // turn-starting user
+  { type: "message", id: "u1", parentId: "", timestamp: "2026-04-11T00:00:00.000Z",
+    message: { role: "user", content: [{ type: "text", text: "go" }] } },
+  // a0 — first assistant with thinking + 1 tool call (read)
+  { type: "message", id: "a0", parentId: "u1", timestamp: "2026-04-11T00:00:01.000Z",
+    message: { role: "assistant", content: [
+      { type: "thinking", text: "thinking-a0" }, // 11 chars (we'll make it 10 below)
+      { type: "toolCall", name: "read", id: "tc0", arguments: { file_path: "/tmp/x" } },
+    ], usage: { input: 10000, output: 200, cacheRead: 0, totalTokens: 10200 } } },
+  // tool result from a0 — 1200 chars
+  { type: "message", id: "r0", parentId: "a0", timestamp: "2026-04-11T00:00:02.000Z",
+    message: { role: "toolResult", content: [{ type: "text", text: "x".repeat(1200) }] } },
+  // a1 — assistant with thinking + 1 MCP tool call (feishu_search_doc_wiki)
+  { type: "message", id: "a1", parentId: "r0", timestamp: "2026-04-11T00:00:03.000Z",
+    message: { role: "assistant", content: [
+      { type: "thinking", text: "thinking-a1!!" },  // 13 chars
+      { type: "toolCall", name: "feishu_search_doc_wiki", id: "tc1", arguments: { q: "x" } },
+    ], usage: { input: 11500, output: 180, cacheRead: 10000, totalTokens: 11680 } } },
+  // tool result from a1's MCP call — 800 chars
+  { type: "message", id: "r1", parentId: "a1", timestamp: "2026-04-11T00:00:04.000Z",
+    message: { role: "toolResult", content: [{ type: "text", text: "y".repeat(800) }] } },
+  // a2 — assistant with another tool call
+  { type: "message", id: "a2", parentId: "r1", timestamp: "2026-04-11T00:00:05.000Z",
+    message: { role: "assistant", content: [
+      { type: "thinking", text: "thinkingA2" }, // 10 chars
+      { type: "toolCall", name: "read", id: "tc2", arguments: { file_path: "/tmp/y" } },
+    ], usage: { input: 12300, output: 80, cacheRead: 11500, totalTokens: 12380 } } },
+  // tool result from a2 — 0 chars (empty)
+  { type: "message", id: "r2", parentId: "a2", timestamp: "2026-04-11T00:00:06.000Z",
+    message: { role: "toolResult", content: [{ type: "text", text: "" }] } },
+  // a3 — REPLY assistant, thinking + 120-char text
+  { type: "message", id: "a3", parentId: "r2", timestamp: "2026-04-11T00:00:07.000Z",
+    message: { role: "assistant", content: [
+      { type: "thinking", text: "think" }, // 5 chars
+      { type: "text", text: "z".repeat(120) },
+    ], usage: { input: 12500, output: 50, cacheRead: 12300, totalTokens: 12550 } } },
+];
+
+// ─── Group 2: Parser populates new fields correctly ─────────────
+console.log("\n=== Group 2: Parser populates new fields ===");
+const parsedRuns = parseTranscript(fixtureEntries, sessionKey);
+assert(parsedRuns.length === 1, "1 run produced from synthetic transcript");
+const run = parsedRuns[0];
+
+// MODEL_THINK on a0 carries usage.input
+const a0Think = run.steps.find((s: any) => s.stepId === "a0");
+assert(a0Think?.inputTokens === 10000, "a0 MODEL_THINK.inputTokens == 10000");
+assert(a0Think?.cacheReadTokens === 0, "a0 cacheReadTokens == 0");
+assert(a0Think?.thinkingTextLen === 11, "a0 thinkingTextLen == 11", `got ${a0Think?.thinkingTextLen}`);
+
+const a1Think = run.steps.find((s: any) => s.stepId === "a1");
+assert(a1Think?.inputTokens === 11500, "a1 MODEL_THINK.inputTokens == 11500");
+assert(a1Think?.cacheReadTokens === 10000, "a1 cacheReadTokens == 10000");
+
+const reply = run.steps.find((s: any) => s.nodeType === "REPLY");
+assert(reply?.inputTokens === 12500, "REPLY inputTokens == 12500");
+assert(reply?.replyTextLen === 120, "REPLY replyTextLen == 120");
+
+// Tool call rows have NULL inputTokens
+const tc0 = run.steps.find((s: any) => s.toolName === "read" && s.stepId.startsWith("a0:"));
+assert(tc0?.inputTokens === undefined, "tool_call row has no inputTokens");
+
+// ─── Persist to DB and exercise the storage repo ────────────────
+upsertSteps(run);
+const stepCount = (getDb().prepare("SELECT COUNT(*) as n FROM steps").get() as any).n;
+assert(stepCount > 0, `steps written to DB (${stepCount} rows)`);
+
+// Verify the new columns made it to disk
+const a0Row = getDb().prepare("SELECT input_tokens, cache_read_tokens, thinking_text_len FROM steps WHERE step_id = 'a0'").get() as any;
+assert(a0Row?.input_tokens === 10000, "a0 row in DB has input_tokens=10000");
+assert(a0Row?.cache_read_tokens === 0, "a0 row in DB has cache_read_tokens=0");
+assert(a0Row?.thinking_text_len === 11, "a0 row in DB has thinking_text_len=11");
+
+// ─── Group 3: getContextBreakdown (coarse 5-bucket) ─────────────
+console.log("\n=== Group 3: getContextBreakdown ===");
+const breakdown = getContextBreakdown(sessionKey, "u1");
+assert(breakdown != null, "getContextBreakdown returns a result");
+if (breakdown) {
+  assert(breakdown.totalLatest === 12500, "totalLatest == 12500 (last assistant.input)",
+    `got ${breakdown.totalLatest}`);
+  assert(breakdown.frameworkBaseline === 10000, "frameworkBaseline == 10000",
+    `got ${breakdown.frameworkBaseline}`);
+  assert(breakdown.turns.length === 4, "4 turns in breakdown",
+    `got ${breakdown.turns.length}`);
+
+  // Turn 0: baseline, no contributors
+  assert(breakdown.turns[0].deltaFromPrev === null, "turn 0 deltaFromPrev is null");
+  assert(breakdown.turns[0].contributors === null, "turn 0 contributors is null");
+  assert(breakdown.turns[0].inputTokens === 10000, "turn 0 inputTokens == 10000");
+
+  // Turn 1: Δ = 1500, priorOutput=200, toolResults=1200/4=300,
+  // mcpDelta=1500 (a1's tool call is feishu_search_doc_wiki = MCP_CALL,
+  // and the parser stamps context_token_delta = a1.input - a0.input = 1500
+  // on it). unaccounted = 1500 - 200 - 300 - 1500 = -500
+  const t1 = breakdown.turns[1];
+  assert(t1.deltaFromPrev === 1500, "turn 1 deltaFromPrev == 1500", `got ${t1.deltaFromPrev}`);
+  assert(t1.contributors?.priorOutput === 200, "turn 1 priorOutput == 200");
+  assert(t1.contributors?.toolResultsCharApprox === 300, "turn 1 toolResultsCharApprox == 300");
+  assert(t1.contributors?.mcpDelta === 1500,
+    "turn 1 mcpDelta == 1500 (MCP_CALL row carries context_token_delta)",
+    `got ${t1.contributors?.mcpDelta}`);
+  assert(t1.contributors?.unaccounted === -500,
+    "turn 1 unaccounted == 1500 - 200 - 300 - 1500 = -500",
+    `got ${t1.contributors?.unaccounted}`);
+
+  // Turn 2: Δ=800, priorOutput=180, toolResults=200, mcpDelta=0
+  // (a2's tool call is `read`, not MCP). unaccounted = 800 - 180 - 200 - 0 = 420
+  const t2 = breakdown.turns[2];
+  assert(t2.deltaFromPrev === 800, "turn 2 deltaFromPrev == 800");
+  assert(t2.contributors?.priorOutput === 180, "turn 2 priorOutput == 180");
+  assert(t2.contributors?.toolResultsCharApprox === 200, "turn 2 toolResultsCharApprox == 200");
+  assert(t2.contributors?.mcpDelta === 0, "turn 2 mcpDelta == 0 (a2's tool is read, not MCP)");
+  assert(t2.contributors?.unaccounted === 420,
+    "turn 2 unaccounted == 800 - 180 - 200 - 0 = 420",
+    `got ${t2.contributors?.unaccounted}`);
+
+  // Turn 3: REPLY, Δ = 200, priorOutput=80, toolResults=0/4=0, mcpDelta=0
+  //   unaccounted = 200 - 80 - 0 - 0 = 120
+  const t3 = breakdown.turns[3];
+  assert(t3.deltaFromPrev === 200, "turn 3 deltaFromPrev == 200");
+  assert(t3.contributors?.priorOutput === 80, "turn 3 priorOutput == 80");
+  assert(t3.contributors?.toolResultsCharApprox === 0, "turn 3 toolResultsCharApprox == 0 (empty result)");
+  assert(t3.contributors?.unaccounted === 120, "turn 3 unaccounted == 120");
+
+  // Sanity invariant: baseline + Σ Δ == totalLatest
+  const sumDelta = breakdown.turns.slice(1)
+    .reduce((s, t) => s + (t.deltaFromPrev || 0), 0);
+  assert(breakdown.frameworkBaseline + sumDelta === breakdown.totalLatest,
+    "sanity: baseline + Σ Δ == totalLatest",
+    `${breakdown.frameworkBaseline} + ${sumDelta} != ${breakdown.totalLatest}`);
+
+  // Bucket totals (sum across turns 1..3 since turn 0 is the baseline)
+  // assistantOutputs = 200 + 180 + 80 = 460  (priorOutput at each Δ)
+  // toolResults = 300 + 200 + 0 = 500
+  // mcpDeltas = 1500 + 0 + 0 = 1500
+  // unaccounted = -500 + 420 + 120 = 40
+  assert(breakdown.buckets.assistantOutputsCumulative === 460,
+    "buckets.assistantOutputsCumulative == 460",
+    `got ${breakdown.buckets.assistantOutputsCumulative}`);
+  assert(breakdown.buckets.toolResultsCumulative === 500,
+    "buckets.toolResultsCumulative == 500",
+    `got ${breakdown.buckets.toolResultsCumulative}`);
+  assert(breakdown.buckets.mcpDeltasCumulative === 1500,
+    "buckets.mcpDeltasCumulative == 1500",
+    `got ${breakdown.buckets.mcpDeltasCumulative}`);
+  assert(breakdown.buckets.unaccountedCumulative === 40,
+    "buckets.unaccountedCumulative == -500 + 420 + 120 = 40",
+    `got ${breakdown.buckets.unaccountedCumulative}`);
+}
+
+// ─── Group 4: getContextTimeline (fine-grained) ─────────────────
+console.log("\n=== Group 4: getContextTimeline ===");
+const timeline = getContextTimeline(sessionKey, "u1");
+assert(timeline != null, "getContextTimeline returns a result");
+if (timeline) {
+  assert(timeline.turns.length === 4, "4 turns in timeline");
+
+  // Per-turn cumulative checks
+  const tt = timeline.turns;
+  assert(tt[0].deltaIn === null, "turn 0 deltaIn == null");
+  assert(tt[1].deltaIn === 1500, "turn 1 deltaIn == 1500");
+  assert(tt[2].deltaIn === 800, "turn 2 deltaIn == 800");
+  assert(tt[3].deltaIn === 200, "turn 3 deltaIn == 200");
+
+  // primaryTool detection
+  assert(tt[0].primaryTool === "read", "turn 0 primaryTool == read");
+  assert(tt[1].primaryTool === "feishu_search_doc_wiki", "turn 1 primaryTool == feishu_search_doc_wiki");
+  assert(tt[3].primaryTool === null, "turn 3 (REPLY) primaryTool == null");
+
+  // prevToolResultChars on turn 1 (the result from a0's read = 1200 chars)
+  assert(tt[1].prevToolResultChars === 1200, "turn 1 prevToolResultChars == 1200");
+  // prevToolResultChars on turn 2 (the result from a1's MCP call = 800 chars)
+  assert(tt[2].prevToolResultChars === 800, "turn 2 prevToolResultChars == 800");
+
+  // thinkingChars
+  assert(tt[0].thinkingChars === 11, "turn 0 thinkingChars == 11");
+  assert(tt[1].thinkingChars === 13, "turn 1 thinkingChars == 13");
+  assert(tt[3].thinkingChars === 5, "turn 3 thinkingChars == 5");
+
+  // replyTextChars
+  assert(tt[3].replyTextChars === 120, "turn 3 replyTextChars == 120");
+  assert(tt[0].replyTextChars === 0, "turn 0 replyTextChars == 0 (no text content)");
+
+  // Cumulative aggregates — totalOutputTokens sums output_tokens across
+  // EVERY assistant row, which intentionally double-counts the per-tool
+  // approximation: each tool_call row's output_tokens equals the parent
+  // assistant's output_tokens (when N=1). For our 4-turn fixture:
+  //   a0  MODEL_THINK     : 200
+  //   a0  read tool_call  : 200  (parent.output / 1)
+  //   a1  MODEL_THINK     : 180
+  //   a1  MCP  tool_call  : 180
+  //   a2  MODEL_THINK     :  80
+  //   a2  read tool_call  :  80
+  //   a3  MODEL_THINK     :  50
+  //   a3  REPLY child     :  50
+  //   ─────────────────────────
+  //   TOTAL                1020
+  assert(timeline.cumulative.totalOutputTokens === 1020,
+    "cumulative.totalOutputTokens == 1020 (parent + per-tool double, intentional)",
+    `got ${timeline.cumulative.totalOutputTokens}`);
+
+  // peak input
+  assert(timeline.cumulative.peakInputTokens === 12500, "cumulative.peakInputTokens == 12500");
+  assert(timeline.cumulative.finalInputTokens === 12500, "cumulative.finalInputTokens == 12500");
+
+  // total reply text chars across the run = 120
+  assert(timeline.cumulative.totalReplyTextChars === 120,
+    "cumulative.totalReplyTextChars == 120");
+
+  // total thinking chars = 11 + 13 + 10 + 5 = 39
+  assert(timeline.cumulative.totalThinkingChars === 39,
+    "cumulative.totalThinkingChars == 39",
+    `got ${timeline.cumulative.totalThinkingChars}`);
+
+  // total tool result chars = 1200 + 800 + 0 = 2000
+  assert(timeline.cumulative.totalToolResultChars === 2000,
+    "cumulative.totalToolResultChars == 2000");
+
+  // cache hit rate: cR_total / (in_total + cR_total)
+  // cR_total = 0 + 10000 + 11500 + 12300 = 33800
+  // in_total = 10000 + 11500 + 12300 + 12500 = 46300
+  // hit = 33800 / (46300 + 33800) = 33800 / 80100 ≈ 0.4220
+  const expectedHit = 33800 / 80100;
+  assert(
+    timeline.cumulative.cacheHitRate != null &&
+      Math.abs(timeline.cumulative.cacheHitRate - expectedHit) < 1e-6,
+    `cumulative.cacheHitRate ≈ ${expectedHit.toFixed(4)}`,
+    `got ${timeline.cumulative.cacheHitRate}`,
+  );
+
+  // Top spikes — sorted by deltaIn DESC: turn 1 (1500), turn 2 (800), turn 3 (200)
+  assert(timeline.topSpikes.length === 3, "3 spikes (turns with positive deltaIn)");
+  assert(timeline.topSpikes[0].seq === tt[1].seq && timeline.topSpikes[0].deltaIn === 1500,
+    "top spike #1 is turn 1 with +1500");
+  assert(timeline.topSpikes[1].seq === tt[2].seq && timeline.topSpikes[1].deltaIn === 800,
+    "top spike #2 is turn 2 with +800");
+}
+
+// ─── Group 5: Death-loop heuristic detection ────────────────────
+console.log("\n=== Group 5: Loop heuristic ===");
+{
+  // Build a SECOND synthetic transcript with 12 consecutive read-only
+  // turns, all hitting cache, all reading the same file, no writes.
+  const loopEntries: any[] = [
+    { type: "message", id: "uL", parentId: "", timestamp: "2026-04-11T01:00:00.000Z",
+      message: { role: "user", content: [{ type: "text", text: "loop" }] } },
+  ];
+  // 12 turns of read on the same file with high cache hit rate
+  for (let i = 0; i < 12; i++) {
+    const ts1 = `2026-04-11T01:00:${String(10 + i).padStart(2, "0")}.000Z`;
+    const ts2 = `2026-04-11T01:00:${String(10 + i).padStart(2, "0")}.500Z`;
+    loopEntries.push(
+      { type: "message", id: `aL${i}`, parentId: i === 0 ? "uL" : `rL${i - 1}`, timestamp: ts1,
+        message: { role: "assistant", content: [
+          { type: "thinking", text: "still reading" },
+          { type: "toolCall", name: "read", id: `tcL${i}`, arguments: { file_path: "/tmp/loop.py" } },
+        ], usage: {
+          input: 5000 + i * 50,           // grows ~50/turn → drift well under 5%
+          output: 30,
+          cacheRead: 50000 + i * 200,     // big cache → ~91% hit rate per turn
+          totalTokens: 5050 + i * 50,
+        } } },
+      { type: "message", id: `rL${i}`, parentId: `aL${i}`, timestamp: ts2,
+        message: { role: "toolResult", content: [{ type: "text", text: "loop body" }] } },
+    );
+  }
+  const loopRun = parseTranscript(loopEntries, "agent:test:loop")[0];
+  upsertSteps(loopRun);
+
+  const loopTimeline = getContextTimeline("agent:test:loop", "uL");
+  assert(loopTimeline != null, "loop timeline exists");
+  if (loopTimeline) {
+    assert(loopTimeline.loopFlags.consecutiveNoWriteTurns >= 12,
+      "loop: consecutiveNoWriteTurns >= 12",
+      `got ${loopTimeline.loopFlags.consecutiveNoWriteTurns}`);
+    assert(loopTimeline.loopFlags.suspectedLoopWindows.length >= 1,
+      "loop: at least one suspectedLoopWindow",
+      `got ${loopTimeline.loopFlags.suspectedLoopWindows.length}`);
+    assert(loopTimeline.loopFlags.suspectedLoopWindows[0].turns >= 8,
+      "loop: window covers >= 8 turns");
+    assert(loopTimeline.loopFlags.healthVerdict === "stuck",
+      "loop: healthVerdict == 'stuck'",
+      `got ${loopTimeline.loopFlags.healthVerdict}`);
+    assert(
+      loopTimeline.loopFlags.repeatedFileReads.some((r: any) => r.filePath.includes("loop.py")),
+      "loop: repeatedFileReads contains the hot file",
+    );
+  }
+
+  // Healthy contrast: the original 4-turn run should be 'healthy'
+  const healthy = getContextTimeline(sessionKey, "u1");
+  assert(healthy?.loopFlags.healthVerdict === "healthy",
+    "healthy 4-turn run reports healthy verdict");
+}
+
+// ─── Group 6: HTTP route handler shape ──────────────────────────
+//
+// Calls handleSessionsRoutes.context() directly with a mock res +
+// sendJson — avoids binding to port 18902 (which the live obs-v2 owns)
+// and tests exactly the same code path the HTTP layer hits.
+console.log("\n=== Group 6: HTTP route handler ===");
+{
+  const { handleSessionsRoutes } = await import("../src/api/routes-sessions.ts");
+
+  let payload: any = null;
+  let status: number | undefined = undefined;
+  const sendJson = (_res: any, data: any, s?: number) => { payload = data; status = s; };
+  handleSessionsRoutes.context(sessionKey, { runId: "u1" }, {} as any, sendJson);
+
+  assert(status === undefined || status === 200, "context handler returns 200 (no explicit status)");
+  assert(payload != null, "context handler called sendJson with a payload");
+  if (payload) {
+    assert(payload.breakdown != null, "payload has breakdown");
+    assert(payload.timeline != null, "payload has timeline");
+    assert(payload.breakdown.totalLatest === 12500,
+      "handler breakdown.totalLatest matches storage repo (12500)",
+      `got ${payload.breakdown?.totalLatest}`);
+    assert(payload.timeline.cumulative.peakInputTokens === 12500,
+      "handler timeline.cumulative.peakInputTokens matches storage repo (12500)",
+      `got ${payload.timeline?.cumulative?.peakInputTokens}`);
+    assert(payload.runId === "u1", "handler runId matches the requested run");
+  }
+
+  // 404 path
+  let payload404: any = null;
+  let status404: number | undefined = undefined;
+  const sendJson404 = (_res: any, data: any, s?: number) => { payload404 = data; status404 = s; };
+  handleSessionsRoutes.context("agent:nonexistent:foo", { runId: "doesnotexist" }, {} as any, sendJson404);
+  assert(status404 === 404, "unknown session/run returns 404",
+    `got status ${status404}`);
+  assert(payload404?.error != null, "404 payload carries an error message");
+}
+
+// Cleanup
+closeDb();
+try { rmSync(tmpHome, { recursive: true, force: true }); } catch { /* best effort */ }
+
+console.log(`\n${"=".repeat(50)}`);
+console.log(`Context length: ${passed} passed, ${failed} failed`);
+if (failed > 0) {
+  console.log("\nFailures:");
+  for (const f of failures) console.log(`  • ${f}`);
+  process.exit(1);
+}

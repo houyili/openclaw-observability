@@ -39,7 +39,7 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join, basename } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { execSync } from "node:child_process";
+import { execSync, spawnSync } from "node:child_process";
 import { CONFIG } from "../src/config.ts";
 import { parseTranscript, type TranscriptEntry } from "../src/ingest/transcript-parser.ts";
 
@@ -322,6 +322,32 @@ if (!serviceUp) {
   assert(summary.runs === sqlRunCount,
     "summary.runs matches COUNT(DISTINCT run_id) in steps",
     `api=${summary.runs} sql=${sqlRunCount}`);
+}
+
+// ─── Step 7: Round 6 — observ_cli end-to-end against the live DB ──
+console.log("\n=== observ_cli status spawn against live DB ===");
+{
+  const { fileURLToPath } = await import("node:url");
+  const { dirname } = await import("node:path");
+  const liveE2eDir = dirname(fileURLToPath(import.meta.url));
+  const cliPath = join(liveE2eDir, "..", "scripts", "observ_cli.ts");
+  const result = spawnSync(
+    process.execPath,
+    [
+      "--experimental-sqlite",
+      "--experimental-strip-types",
+      "--no-warnings",
+      cliPath,
+      "status",
+    ],
+    { encoding: "utf-8", timeout: 15_000 },
+  );
+  assert(result.status === 0, "observ_cli status exits 0",
+    `status=${result.status} stderr=${(result.stderr || "").slice(0, 200)}`);
+  assert(result.stdout.includes("service"),
+    "observ_cli status output mentions 'service'");
+  assert(result.stdout.includes("db"),
+    "observ_cli status output mentions 'db'");
 }
 
 db.close();

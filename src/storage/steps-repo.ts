@@ -4,17 +4,24 @@ import type { ParsedStep, ParsedRun } from "../ingest/transcript-parser.ts";
 
 export function upsertSteps(run: ParsedRun): void {
   const db = getDb();
+  // Round 6 — INSERT and ON CONFLICT both carry the four new fields so a
+  // re-upsert (e.g. on first-tick reparse after a parser fix) backfills
+  // older rows in place.
   const stmt = db.prepare(`
     INSERT INTO steps (step_id, session_key, run_id, parent_step_id, seq, ts, ts_epoch_ms,
       role, node_type, tool_name, tool_call_id, skill_name, script_name, mcp_server, mcp_tool,
       duration_ms, total_tokens, output_tokens, input_text_len, result_text_len,
       context_token_delta, status, error_text, error_type, is_stuck, is_current,
-      input_preview, result_preview)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      input_preview, result_preview,
+      input_tokens, cache_read_tokens, thinking_text_len, reply_text_len)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+            ?, ?, ?, ?)
     ON CONFLICT(step_id) DO UPDATE SET
       duration_ms=excluded.duration_ms, status=excluded.status, error_text=excluded.error_text,
       error_type=excluded.error_type, is_stuck=excluded.is_stuck, is_current=excluded.is_current,
-      result_text_len=excluded.result_text_len, result_preview=excluded.result_preview
+      result_text_len=excluded.result_text_len, result_preview=excluded.result_preview,
+      input_tokens=excluded.input_tokens, cache_read_tokens=excluded.cache_read_tokens,
+      thinking_text_len=excluded.thinking_text_len, reply_text_len=excluded.reply_text_len
   `);
 
   for (const s of run.steps) {
@@ -27,6 +34,8 @@ export function upsertSteps(run: ParsedRun): void {
       s.status, s.errorText || null, s.errorType || null,
       s.isStuck ? 1 : 0, s.isCurrent ? 1 : 0,
       s.inputPreview || null, s.resultPreview || null,
+      s.inputTokens ?? null, s.cacheReadTokens ?? null,
+      s.thinkingTextLen ?? null, s.replyTextLen ?? null,
     );
   }
 }

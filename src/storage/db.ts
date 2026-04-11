@@ -15,6 +15,17 @@ export function getDb(): DatabaseSync {
   return _db;
 }
 
+/**
+ * Idempotent column add. SQLite's `ALTER TABLE ADD COLUMN` is not natively
+ * idempotent — running it twice errors. Guard with PRAGMA table_info so the
+ * migration is safe across every restart.
+ */
+function ensureColumn(db: DatabaseSync, table: string, col: string, ddl: string): void {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+  if (cols.some((c) => c.name === col)) return;
+  db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${ddl}`);
+}
+
 function migrate(db: DatabaseSync): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS sessions (
@@ -79,6 +90,15 @@ function migrate(db: DatabaseSync): void {
       result_preview      TEXT
     )
   `);
+
+  // Round 6 — additive columns for the Context Length view. Each is
+  // nullable so the migration is backward-compatible: existing rows stay
+  // NULL until the next service restart triggers Round 2's first-tick
+  // full-file reparse, at which point they get backfilled in place.
+  ensureColumn(db, "steps", "input_tokens",       "INTEGER");  // usage.input on MODEL_THINK / REPLY
+  ensureColumn(db, "steps", "cache_read_tokens",  "INTEGER");  // usage.cacheRead on MODEL_THINK / REPLY
+  ensureColumn(db, "steps", "thinking_text_len",  "INTEGER");  // chars in content[].type='thinking'
+  ensureColumn(db, "steps", "reply_text_len",     "INTEGER");  // full chars of REPLY text content
 
   // Indexes
   db.exec(`CREATE INDEX IF NOT EXISTS idx_steps_session_run ON steps(session_key, run_id, seq)`);
