@@ -1,0 +1,20 @@
+{
+  "name": "openclaw-observability-v2",
+  "version": "0.1.0",
+  "description": "OpenClaw observability dashboard — transcript-based session monitoring",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "start": "node --experimental-sqlite --experimental-strip-types --no-warnings src/index.ts",
+    "dev": "node --experimental-sqlite --experimental-strip-types --watch --no-warnings src/index.ts",
+    "test": "./tests/run-all.sh",
+    "test:unit": "node --experimental-sqlite --experimental-strip-types --no-warnings tests/run-tests.ts",
+    "test:invariants": "node --experimental-sqlite --experimental-strip-types --no-warnings tests/parser-invariants.test.ts",
+    "test:replay": "node --experimental-sqlite --experimental-strip-types --no-warnings tests/replay-verify.ts",
+    "test:cross-check": "node --experimental-sqlite --experimental-strip-types --no-warnings tests/cross-check-official.ts",
+    "test:perf": "node --experimental-sqlite --experimental-strip-types --no-warnings tests/perf-bench.ts"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}

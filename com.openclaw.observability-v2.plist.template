@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  launchd KeepAlive template for the observability-v2 dashboard.
+
+  This is a TEMPLATE. Copy to `com.openclaw.observability-v2.plist` in the
+  same directory and replace every `__...__` placeholder with an absolute
+  path for your machine. launchd does NOT expand $HOME, so absolute paths
+  are required.
+
+      cp com.openclaw.observability-v2.plist.template \
+         com.openclaw.observability-v2.plist
+      sed -i '' "s|__HOME__|$HOME|g" com.openclaw.observability-v2.plist
+      sed -i '' "s|__NODE__|$(which node)|g" com.openclaw.observability-v2.plist
+
+  Then install:
+
+      ./scripts/service.sh install
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.openclaw.observability-v2</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__NODE__</string>
+        <string>--experimental-sqlite</string>
+        <string>--experimental-strip-types</string>
+        <string>--no-warnings</string>
+        <string>__HOME__/.openclaw/extensions/observability-v2/src/index.ts</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>__HOME__/.openclaw/extensions/observability-v2</string>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>__HOME__/.openclaw/logs/observability-v2/stdout.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>__HOME__/.openclaw/logs/observability-v2/stderr.log</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>__HOME__/.local/bin:__HOME__/.npm-global/bin:/usr/local/bin:/usr/bin:/bin</string>
+    </dict>
+
+    <key>ThrottleInterval</key>
+    <integer>5</integer>
+</dict>
+</plist>

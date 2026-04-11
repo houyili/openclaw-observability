@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>OpenClaw Observability</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <div class="header-left">
+    <h1>OpenClaw Observability Dashboard</h1>
+    <span class="header-sub" id="header-time"></span>
+  </div>
+  <nav>
+    <button class="tab active" data-tab="sessions">Sessions</button>
+    <button class="tab" data-tab="skills">Skills</button>
+    <button class="tab" data-tab="scripts">Scripts</button>
+    <button class="tab" data-tab="mcps">MCPs</button>
+  </nav>
+  <span id="refresh-indicator">● auto-refresh 5s</span>
+</header>
+
+<!-- JSON links (v1 feature) -->
+<div class="json-links">
+  <a href="/healthz" target="_blank">/healthz</a>
+  <a href="/api/summary" target="_blank">summary json</a>
+  <a href="/api/sessions" target="_blank">sessions json</a>
+  <a href="/api/skills?range=all" target="_blank">skills json</a>
+  <a href="/api/scripts?range=all" target="_blank">scripts json</a>
+  <a href="/api/mcps?range=all" target="_blank">mcps json</a>
+  <a href="/api/registry" target="_blank">registry json</a>
+</div>
+
+<!-- Summary Cards (v1 feature) -->
+<div id="summary-cards" class="summary-cards"></div>
+
+<main>
+  <!-- Tab 1: Sessions -->
+  <div id="tab-sessions" class="tab-content active">
+    <!-- Sub-tab switcher: Sessions vs Cron -->
+    <div class="sub-tabs">
+      <button class="sub-tab active" data-subtab="sessions">Sessions</button>
+      <button class="sub-tab" data-subtab="cron">Cron Jobs</button>
+    </div>
+    <div class="filters">
+      <select id="filter-channel"><option value="">All channels</option></select>
+      <select id="filter-agent"><option value="">All agents</option></select>
+      <select id="filter-state">
+        <option value="">All states</option>
+        <option value="processing">processing</option>
+        <option value="waiting">waiting</option>
+        <option value="idle">idle</option>
+        <option value="stuck">stuck</option>
+      </select>
+      <input id="filter-diag" type="text" placeholder="Filter by diag...">
+      <input id="filter-label" type="text" placeholder="Filter by label...">
+      <input id="filter-q" type="text" placeholder="Search...">
+    </div>
+    <div class="table-wrap">
+      <table id="sessions-table">
+        <thead><tr>
+          <th class="col-expand"></th>
+          <th>Agent</th>
+          <th>Session Key</th>
+          <th>Diag</th>
+          <th>Label</th>
+          <th>Channel</th>
+          <th>Kind</th>
+          <th>Source</th>
+          <th>State</th>
+          <th>Current Op</th>
+          <th>Blocker</th>
+          <th>Age</th>
+          <th>Total Tok</th>
+          <th>In/Out</th>
+          <th>LLM</th>
+          <th>Tools</th>
+          <th>Skills</th>
+          <th>MCPs</th>
+          <th>Model</th>
+          <th>Mode</th>
+          <th>Activity</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <div id="session-pagination" class="pagination"></div>
+    <div id="session-detail" class="hidden"></div>
+  </div>
+
+  <!-- Tab 2: Skills -->
+  <div id="tab-skills" class="tab-content hidden">
+    <div class="filters">
+      <select id="skills-range"><option value="day">Day</option><option value="week">Week</option><option value="month">Month</option><option value="all">All time</option></select>
+      <input id="skills-q" type="text" placeholder="Search skills...">
+    </div>
+    <div id="skills-rankings" class="rankings"></div>
+    <div class="table-wrap">
+      <table id="skills-table"><thead><tr>
+        <th>Name</th><th>Path</th><th>Status</th><th>Calls</th><th>Avg (ms)</th><th>P95 (ms)</th><th>Tokens</th><th>Errors</th><th>Stuck</th>
+      </tr></thead><tbody></tbody></table>
+    </div>
+  </div>
+
+  <!-- Tab 3: Scripts -->
+  <div id="tab-scripts" class="tab-content hidden">
+    <div class="filters">
+      <select id="scripts-range"><option value="day">Day</option><option value="week">Week</option><option value="month">Month</option><option value="all">All time</option></select>
+      <input id="scripts-q" type="text" placeholder="Search scripts...">
+    </div>
+    <div id="scripts-rankings" class="rankings"></div>
+    <div class="table-wrap">
+      <table id="scripts-table"><thead><tr>
+        <th>Name</th><th>Path</th><th>Calls</th><th>Avg (ms)</th><th>P95 (ms)</th><th>Errors</th><th>Stuck</th>
+      </tr></thead><tbody></tbody></table>
+    </div>
+  </div>
+
+  <!-- Tab 4: MCPs -->
+  <div id="tab-mcps" class="tab-content hidden">
+    <div class="filters">
+      <select id="mcps-range"><option value="day">Day</option><option value="week">Week</option><option value="month">Month</option><option value="all">All time</option></select>
+      <input id="mcps-q" type="text" placeholder="Search MCPs...">
+    </div>
+    <div id="mcps-rankings" class="rankings"></div>
+    <div class="table-wrap">
+      <table id="mcps-table"><thead><tr>
+        <th>Name</th><th>Server</th><th>Calls</th><th>Avg</th><th>P95</th><th>Err%</th><th>Errors</th><th>Stuck</th><th>Bytes</th><th>Ctx&Delta;</th>
+      </tr></thead><tbody></tbody></table>
+    </div>
+  </div>
+</main>
+
+<script src="app.js"></script>
+</body>
+</html>
