@@ -105,17 +105,18 @@ so the launchd service can always hit `/healthz`.
 ## Run the tests
 
 ```bash
-npm test                   # all 9 suites — needs a live obs-v2 + transcripts
-npm run test:hermetic      # only the 4 hermetic suites — clean clone, no live deps
+npm test                   # all 11 suites — needs a live obs-v2 + transcripts
+npm run test:hermetic      # only the 6 hermetic suites — clean clone, no live deps
 npm run test:cross-check   # just the ground-truth diff vs openclaw CLI
 ```
 
-`npm test` runs **9 suites with ~437 assertions** against the live obs-v2
+`npm test` runs **11 suites with ~625 assertions** against the live obs-v2
 service and the user's actual `~/.openclaw/agents/` transcripts.
-`npm run test:hermetic` runs the 4 suites that have no host dependencies
-(`unit + invariants + fixture + auth-stale`, ~119 assertions) — a fresh
-`git clone` on a machine with only Node 22 installed can run these and
-verify the parser + storage + auth-stale handling all work end-to-end.
+`npm run test:hermetic` runs the 6 suites that have no host dependencies
+(`unit + invariants + fixture + auth-stale + context-length + cli-commands`,
+~291 assertions) — a fresh `git clone` on a machine with only Node 22
+installed can run these and verify the parser, storage, auth-stale
+handling, Context Length view, and channel CLI all work end-to-end.
 
 See the **Data correctness** section below for what each suite proves.
 
