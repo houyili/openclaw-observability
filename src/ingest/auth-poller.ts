@@ -195,11 +195,19 @@ function parseChannel(key: string): string {
  * Read session store files to get label and other fields not in CLI --json.
  * Returns a map: sessionKey → {label, ...}
  */
-export function readSessionStoreExtras(): Map<string, { label: string | null; parentSessionKey: string | null }> {
-  const map = new Map<string, { label: string | null; parentSessionKey: string | null }>();
+export interface SessionStoreExtra {
+  label: string | null;
+  sessionId: string | null;
+  parentSessionKey: string | null;
+  parentSessionId: string | null;
+}
+
+export function readSessionStoreExtras(): Map<string, SessionStoreExtra> {
+  const map = new Map<string, SessionStoreExtra>();
   const agentsDir = CONFIG.AGENTS_DIR;
   if (!existsSync(agentsDir)) return map;
 
+  // Pass 1: collect all entries with their sessionId and spawnedBy (session_key)
   for (const agent of readdirSync(agentsDir, { withFileTypes: true })) {
     if (!agent.isDirectory()) continue;
     const storePath = join(agentsDir, agent.name, "sessions", "sessions.json");
@@ -212,10 +220,23 @@ export function readSessionStoreExtras(): Map<string, { label: string | null; pa
         const e = entry as Record<string, unknown>;
         map.set(key, {
           label: typeof e.label === "string" ? e.label : null,
+          sessionId: typeof e.sessionId === "string" ? e.sessionId : null,
           parentSessionKey: typeof e.spawnedBy === "string" ? e.spawnedBy : null,
+          parentSessionId: null, // resolved in pass 2
         });
       }
     } catch { /* skip unreadable stores */ }
   }
+
+  // Pass 2: resolve parentSessionId by looking up spawnedBy key in the map
+  for (const extra of map.values()) {
+    if (extra.parentSessionKey) {
+      const parentEntry = map.get(extra.parentSessionKey);
+      if (parentEntry?.sessionId) {
+        extra.parentSessionId = parentEntry.sessionId;
+      }
+    }
+  }
+
   return map;
 }

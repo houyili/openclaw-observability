@@ -34,7 +34,7 @@ function doAuthPoll(): void {
       const extras = readSessionStoreExtras();
       for (const [key, extra] of extras) {
         if (extra.label) updateSessionLabel(key, extra.label);
-        if (extra.parentSessionKey) updateSessionParent(key, extra.parentSessionKey);
+        if (extra.parentSessionKey) updateSessionParent(key, extra.parentSessionKey, extra.parentSessionId);
       }
     } catch (err) {
       console.error("[auth-poller] Error:", (err as Error).message);

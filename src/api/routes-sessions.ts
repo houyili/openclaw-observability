@@ -17,16 +17,17 @@ export const handleSessionsRoutes = {
       diag: query.diag,
       label: query.label,
       parentKey: query.parentKey,
+      parentId: query.parentId,
       isCron,
       page: query.page ? parseInt(query.page) : 1,
       pageSize: query.pageSize ? parseInt(query.pageSize) : pageSize,
     });
 
-    // Batch-fetch child counts and parent display info for all sessions on this page.
-    const allKeys = sessions.map(s => s.session_key);
-    const childCounts = getChildCounts(allKeys);
-    const parentKeys = [...new Set(sessions.map(s => s.parent_session_key).filter(Boolean))] as string[];
-    const parentInfo = getParentInfoBatch(parentKeys);
+    // Batch-fetch child counts (by session_id) and parent display info.
+    const allSessionIds = sessions.map(s => s.session_id).filter(Boolean) as string[];
+    const childCounts = getChildCounts(allSessionIds);
+    const parentSessionIds = [...new Set(sessions.map(s => s.parent_session_id).filter(Boolean))] as string[];
+    const parentInfo = getParentInfoBatch(parentSessionIds);
 
     const result = sessions.map(s => {
       const latestRun = getLatestRun(s.session_key);
@@ -64,10 +65,11 @@ export const handleSessionsRoutes = {
         ageMs: s.age_ms,
         updatedAt: s.updated_at,
         parentSessionKey: s.parent_session_key || null,
-        parentDiag: s.parent_session_key ? (parentInfo.get(s.parent_session_key)?.diag || null) : null,
-        parentLabel: s.parent_session_key ? (parentInfo.get(s.parent_session_key)?.label || null) : null,
-        parentAgentId: s.parent_session_key ? (parentInfo.get(s.parent_session_key)?.agentId || null) : null,
-        childCount: childCounts.get(s.session_key) || 0,
+        parentSessionId: s.parent_session_id || null,
+        parentDiag: s.parent_session_id ? (parentInfo.get(s.parent_session_id)?.diag || null) : null,
+        parentLabel: s.parent_session_id ? (parentInfo.get(s.parent_session_id)?.label || null) : null,
+        parentAgentId: s.parent_session_id ? (parentInfo.get(s.parent_session_id)?.agentId || null) : null,
+        childCount: childCounts.get(s.session_id) || 0,
         latestRun: latestRun ? {
           runId: latestRun.run_id,
           startedAt: latestRun.started_at,

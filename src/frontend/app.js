@@ -36,7 +36,7 @@ document.querySelectorAll('.sub-tab').forEach(btn => {
     btn.classList.add('active');
     currentSubTab = btn.dataset.subtab;
     currentPage = 1;
-    activeParentKeyFilter = null;
+    activeParentIdFilter = null;
     refresh();
   });
 });
@@ -98,42 +98,49 @@ function parentDisplayName(s) {
   return p.slice(-2).join(':');
 }
 
-function renderParentChild(s) {
+function renderParentChild(s, showChildren) {
   const parts = [];
-  if (s.parentSessionKey) {
+  if (s.parentSessionId) {
     const name = parentDisplayName(s);
     // Only show agent prefix if parent is a different agent than child
     const agentPrefix = (s.parentAgentId && s.parentAgentId !== s.agentId)
       ? esc(s.parentAgentId) + '/' : '';
     parts.push(
-      `<span class="parent-badge" title="${esc(s.parentSessionKey)}" `
-      + `onclick="event.stopPropagation();filterToSession('${esc(s.parentSessionKey)}')">`
+      `<span class="parent-badge" title="parent session: ${esc(s.parentSessionId)}" `
+      + `onclick="event.stopPropagation();filterToSession('${esc(s.parentSessionId)}')">`
       + `^ ${agentPrefix}${esc(name)}</span>`
     );
+  } else if (s.parentSessionKey) {
+    // Fallback: parent_session_id not resolved yet, show key-level link
+    const name = parentDisplayName(s);
+    parts.push(
+      `<span class="parent-badge" title="${esc(s.parentSessionKey)}" `
+      + `onclick="event.stopPropagation();filterToSession('${esc(s.parentSessionKey)}')">`
+      + `^ ${esc(name)}</span>`
+    );
   }
-  if (s.childCount > 0) {
+  if (showChildren) {
     parts.push(
       `<span class="child-badge" `
-      + `onclick="event.stopPropagation();filterChildren('${esc(s.sessionKey)}')">`
+      + `onclick="event.stopPropagation();filterChildren('${esc(s.sessionId)}')">`
       + `${s.childCount} sub</span>`
     );
   }
   return parts.length > 0 ? parts.join(' ') : '-';
 }
 
-/** Active parentKey filter — set when user clicks "N sub" badge. */
-let activeParentKeyFilter = null;
+/** Active parent filter — set when user clicks "N sub" badge. */
+let activeParentIdFilter = null;
 
-/** Filter session list to show a specific session (e.g. jump to parent). */
-window.filterToSession = function(key) {
+/** Filter session list to show a specific session (e.g. jump to parent by session_id). */
+window.filterToSession = function(sessionId) {
   clearParentFilter();
   const qInput = document.getElementById('filter-q');
-  if (qInput) { qInput.value = key.slice(-20); currentPage = 1; refresh(); }
+  if (qInput) { qInput.value = sessionId.slice(0, 8); currentPage = 1; refresh(); }
 };
-/** Filter session list to show children of a parent session. */
-window.filterChildren = function(parentKey) {
-  activeParentKeyFilter = parentKey;
-  // Clear other filters so children are visible regardless of channel/state
+/** Filter session list to show children of a parent session (by session_id). */
+window.filterChildren = function(parentSessionId) {
+  activeParentIdFilter = parentSessionId;
   const channelSel = document.getElementById('filter-channel');
   const stateSel = document.getElementById('filter-state');
   const qInput = document.getElementById('filter-q');
@@ -143,7 +150,7 @@ window.filterChildren = function(parentKey) {
   currentPage = 1;
   refresh();
 };
-function clearParentFilter() { activeParentKeyFilter = null; }
+function clearParentFilter() { activeParentIdFilter = null; }
 
 // ─── Summary Cards ──────────────────────────────────────────────
 async function refreshSummary() {
@@ -190,7 +197,7 @@ async function refreshSessions() {
   if (diag) params.set('diag', diag);
   if (label) params.set('label', label);
   if (q) params.set('q', q);
-  if (activeParentKeyFilter) params.set('parentKey', activeParentKeyFilter);
+  if (activeParentIdFilter) params.set('parentId', activeParentIdFilter);
 
   const res = await authFetch('/api/sessions?' + params);
   const data = await res.json();
@@ -213,8 +220,8 @@ async function refreshSessions() {
   // Parent-filter banner
   const bannerEl = document.getElementById('parent-filter-banner');
   if (bannerEl) {
-    if (activeParentKeyFilter) {
-      const short = activeParentKeyFilter.length > 50 ? '...' + activeParentKeyFilter.slice(-40) : activeParentKeyFilter;
+    if (activeParentIdFilter) {
+      const short = activeParentIdFilter.length > 50 ? '...' + activeParentIdFilter.slice(-40) : activeParentIdFilter;
       bannerEl.innerHTML = `<span>Showing children of: <strong>${esc(short)}</strong></span> <button onclick="clearParentFilter();refresh();">clear</button>`;
       bannerEl.classList.remove('hidden');
     } else {
@@ -222,7 +229,11 @@ async function refreshSessions() {
     }
   }
 
+  // Track which session_keys we've already shown child count for (de-dup across same-key rows)
+  const shownChildCountFor = new Set();
   tbody.innerHTML = data.sessions.map(s => {
+    const showChildren = s.childCount > 0 && !shownChildCountFor.has(s.sessionKey);
+    if (s.childCount > 0) shownChildCountFor.add(s.sessionKey);
     const keyShort = s.sessionKey.length > 45 ? '...' + s.sessionKey.slice(-40) : s.sessionKey;
     const modelShort = s.model ? s.model.replace(/^gpt-/, '').split('-').slice(0, 2).join('-') : '';
     const lr = s.latestRun;
@@ -232,10 +243,11 @@ async function refreshSessions() {
       <td><button class="expand-btn" onclick="toggleSession('${esc(s.sessionKey)}')">&#9654;</button></td>
       <td>${esc(s.agentId)}</td>
       <td class="mono"><div class="key-cell" title="${esc(s.sessionKey)}"><span class="key-text">${esc(keyShort)}</span><button class="copy-btn" data-key="${esc(s.sessionKey)}" onclick="event.stopPropagation();copyText(this.dataset.key,this)">copy</button></div></td>
+      <td class="mono text-sm" title="${esc(s.sessionId || '')}">${esc((s.sessionId || '').slice(0, 8))}</td>
       <td class="text-sm">${esc(s.diag || '-')}</td>
       <td>${esc(s.label || '-')}</td>
       <td>${badge(s.channel, s.channel?.includes('feishu') ? 'processing' : s.channel === 'cron' ? 'waiting' : 'default')}</td>
-      <td class="text-sm">${renderParentChild(s)}</td>
+      <td class="text-sm">${renderParentChild(s, showChildren)}</td>
       <td>${esc(s.kind)}</td>
       <td>${badge(s.source || 'auth-only', s.source === 'transcript+auth' ? 'active' : 'default')}</td>
       <td>${badge(s.diagState || 'idle', s.diagState || 'idle')}</td>

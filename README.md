@@ -117,24 +117,24 @@ so the launchd service can always hit `/healthz`.
 ## Run the tests
 
 ```bash
-npm test                   # all 11 suites — needs a live obs-v2 + transcripts
-npm run test:hermetic      # only the 6 hermetic suites — clean clone, no live deps
+npm test                   # all 15 suites — needs a live obs-v2 + transcripts
+npm run test:hermetic      # only the 12 hermetic suites — clean clone, no live deps
 npm run test:cross-check   # just the ground-truth diff vs openclaw CLI
 ```
 
-`npm test` runs **11 suites with ~625 assertions** against the live obs-v2
+`npm test` runs **15 suites with ~700+ assertions** against the live obs-v2
 service and the user's actual `~/.openclaw/agents/` transcripts.
-`npm run test:hermetic` runs the 6 suites that have no host dependencies
-(`unit + invariants + fixture + auth-stale + context-length + cli-commands`,
-~291 assertions) — a fresh `git clone` on a machine with only Node 22
+`npm run test:hermetic` runs the 12 suites that have no host dependencies
+(~492 assertions) — a fresh `git clone` on a machine with only Node 22
 installed can run these and verify the parser, storage, auth-stale
-handling, Context Length view, and channel CLI all work end-to-end.
+handling, Context Length view, channel CLI, watcher re-homing, token
+backfill, and parent-child session lineage all work end-to-end.
 
 See the **Data correctness** section below for what each suite proves.
 
 ## Data correctness
 
-Eleven test suites enforce correctness automatically. The six hermetic
+Fifteen test suites enforce correctness automatically. The twelve hermetic
 ones run anywhere; the five live ones run against the user's real obs-v2
 install.
 
@@ -255,12 +255,42 @@ Plus dispatcher-level edge cases:
 - `parseCommand` defaults to `help` on empty argv
 - `/observ skills week` → handler sees `range='week'`
 
+#### 7. `frontend-detail` — `tests/frontend-detail-view.test.ts` *(Round 6)*
+
+Stacked trace + context detail view rendering. **68 assertions.**
+
+#### 8. `watcher-rehome` — `tests/watcher-rehome.test.ts` *(Round 7)*
+
+Regression tests for the transcript-watcher `sessionIdToKeyMap` TTL
+refresh and raw-UUID step re-homing fix. **22 assertions** in 7 groups:
+raw UUID regex, resolveSessionKey priority, re-homing on map refresh,
+proper key stability, filename prefix stripping, DB fallback, `:run:UUID`
+suffix stripping.
+
+#### 9. `token-backfill` — `tests/token-backfill.test.ts` *(Round 7)*
+
+Regression tests for token aggregation backfill from steps table into
+sessions. **35 assertions** in 8 groups: zero→backfill, non-zero
+preservation, NULL backfill, bulk recompute, no-usage steps, cron
+fan-out, idempotency, end-to-end transcript→recompute.
+
+#### 10. `parent-child` — `tests/parent-child.test.ts` *(Round 7)*
+
+Parent-child session lineage using `session_id`-level linking.
+**49 assertions** in 10 groups: schema migration, `updateSessionParent`
+(write-once key + backfill session_id), `getChildCounts` by session_id,
+`getChildSessions`, `readSessionStoreExtras` 2-pass `spawnedBy` →
+`parentSessionId` resolution, chain A→B→C, cron `:run:UUID`, NULL guard,
+`getParentInfoBatch` by session_id, `getAllSessions` `parentId` filter.
+
 ### Live suites (run against the user's real obs-v2)
 
-#### 7. `integrity` — `tests/data-integrity.test.ts`
+#### 11. `integrity` — `tests/data-integrity.test.ts`
 
-Schema + value invariants over the live `obs.db`. **49 assertions.**
-Found and fixed 1 real bug on its first run.
+Schema + value invariants over the live `obs.db`. **58 assertions.**
+Found and fixed 1 real bug on its first run. Round 7 added 4 parent-child
+integrity checks (no orphaned parent references, no child count inflation,
+subagent parent coverage ≥ 50%, `idx_sessions_parent` index exists).
 
 - **Whole-table sanity**: no NULLs in non-nullable columns; `node_type
   / status / role / error_type` are members of the enumerated sets;
@@ -281,7 +311,7 @@ Found and fixed 1 real bug on its first run.
   `getContextBreakdown` sanity invariant) and
   `timeline.cumulative.peakInputTokens == MAX(input_tokens)` from SQL.
 
-#### 8. `live-e2e` — `tests/live-e2e.test.ts`
+#### 12. `live-e2e` — `tests/live-e2e.test.ts`
 
 End-to-end correctness against the user's actual production sessions.
 **17 assertions.**
@@ -303,7 +333,7 @@ End-to-end correctness against the user's actual production sessions.
   via child_process, asserts exit 0 and output contains the expected
   `service` / `db` lines.
 
-#### 9. `replay` — `tests/replay-verify.ts`
+#### 13. `replay` — `tests/replay-verify.ts`
 
 For every transcript file that currently exists on disk, clean-parse it
 from scratch with the current parser and compare per-`run_id` step counts
@@ -322,7 +352,7 @@ DROPPED runs whose source-file mtime is within `RACE_MTIME_GRACE_MS`
 (8 s) of "now" are forgiven as live-write races. There is no per-run
 cap, so N concurrent active sessions all race-forgiven correctly.
 
-#### 10. `cross-check` — `tests/cross-check-official.ts`
+#### 14. `cross-check` — `tests/cross-check-official.ts`
 
 The **ground truth** suite. Runs `openclaw sessions --all-agents --active
 N --json` and diffs `input_tokens`, `output_tokens`, `total_tokens` against
@@ -333,7 +363,7 @@ the concrete enforcement of constitution §1.3.1 ("主表数值必须与 OpenCla
 Has a `--retry-wait 35` option: if the first pass sees a mismatch, sleep
 past one auth-poll cycle and re-check. Only fail if drift persists.
 
-#### 11. `perf` — `tests/perf-bench.ts`
+#### 15. `perf` — `tests/perf-bench.ts`
 
 Wall-clock + CPU budget for the hot paths. Current measurements on a
 ~22 000-step DB:

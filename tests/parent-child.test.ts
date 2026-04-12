@@ -53,20 +53,23 @@ const now = Date.now();
 
 // Helper: insert a session row
 function insertSession(key: string, sid: string, opts: {
-  agentId?: string; channel?: string; parentSessionKey?: string; updatedAt?: number;
+  agentId?: string; channel?: string;
+  parentSessionKey?: string; parentSessionId?: string;
+  updatedAt?: number;
 } = {}) {
   db.prepare(`INSERT INTO sessions
     (session_key, session_id, agent_id, channel, diag, kind, model,
      input_tokens, output_tokens, total_tokens, context_tokens,
-     updated_at, age_ms, source, parent_session_key)
+     updated_at, age_ms, source, parent_session_key, parent_session_id)
     VALUES (?, ?, ?, ?, 'test', 'direct', 'gpt-5',
-     0, 0, 0, 0, ?, 0, 'auth-only', ?)
+     0, 0, 0, 0, ?, 0, 'auth-only', ?, ?)
   `).run(
     key, sid,
     opts.agentId ?? "test",
     opts.channel ?? "subagent",
     opts.updatedAt ?? now,
     opts.parentSessionKey ?? null,
+    opts.parentSessionId ?? null,
   );
 }
 
@@ -112,24 +115,25 @@ console.log("\n=== Group 2: updateSessionParent ===");
   insertSession(childKey, "sid-c1");
   insertSession(parentKey, "sid-p1", { channel: "feishu-direct" });
 
-  // Set parent
-  updateSessionParent(childKey, parentKey);
-  const row1 = db.prepare("SELECT parent_session_key FROM sessions WHERE session_key = ?").get(childKey) as any;
-  assert(row1.parent_session_key === parentKey, "updateSessionParent sets parent correctly");
+  // Set parent (with session_id)
+  updateSessionParent(childKey, parentKey, "sid-p1");
+  const row1 = db.prepare("SELECT parent_session_key, parent_session_id FROM sessions WHERE session_key = ?").get(childKey) as any;
+  assert(row1.parent_session_key === parentKey, "updateSessionParent sets parent_session_key correctly");
+  assert(row1.parent_session_id === "sid-p1", "updateSessionParent sets parent_session_id correctly");
 
-  // Idempotent: calling again with a DIFFERENT parent should NOT overwrite
+  // Idempotent: calling again with a DIFFERENT parent should NOT overwrite key
   const otherParent = "agent:main:cron:other-parent";
-  updateSessionParent(childKey, otherParent);
-  const row2 = db.prepare("SELECT parent_session_key FROM sessions WHERE session_key = ?").get(childKey) as any;
+  updateSessionParent(childKey, otherParent, "sid-other");
+  const row2 = db.prepare("SELECT parent_session_key, parent_session_id FROM sessions WHERE session_key = ?").get(childKey) as any;
   assert(
     row2.parent_session_key === parentKey,
-    "updateSessionParent does NOT overwrite existing parent",
+    "updateSessionParent does NOT overwrite existing parent key",
     `expected ${parentKey}, got ${row2.parent_session_key}`,
   );
 
   // Session not in DB: should be a no-op (no error)
   let noError = true;
-  try { updateSessionParent("nonexistent:key", parentKey); } catch { noError = false; }
+  try { updateSessionParent("nonexistent:key", parentKey, "sid-p1"); } catch { noError = false; }
   assert(noError, "updateSessionParent on missing session is a no-op (no error)");
 }
 
@@ -148,18 +152,19 @@ console.log("\n=== Group 3: getChildCounts ===");
   insertSession(parent2, "sid-p2", { channel: "cron" });
   insertSession(noChildren, "sid-nc", { channel: "feishu-direct" });
 
-  // 3 children for parent1
-  insertSession("agent:main:subagent:ch1", "sid-ch1", { parentSessionKey: parent1 });
-  insertSession("agent:main:subagent:ch2", "sid-ch2", { parentSessionKey: parent1 });
-  insertSession("agent:main:subagent:ch3", "sid-ch3", { parentSessionKey: parent1 });
+  // 3 children for parent1 (linked by parent_session_id = "sid-p1")
+  insertSession("agent:main:subagent:ch1", "sid-ch1", { parentSessionKey: parent1, parentSessionId: "sid-p1" });
+  insertSession("agent:main:subagent:ch2", "sid-ch2", { parentSessionKey: parent1, parentSessionId: "sid-p1" });
+  insertSession("agent:main:subagent:ch3", "sid-ch3", { parentSessionKey: parent1, parentSessionId: "sid-p1" });
 
-  // 1 child for parent2
-  insertSession("agent:main:subagent:ch4", "sid-ch4", { parentSessionKey: parent2 });
+  // 1 child for parent2 (linked by parent_session_id = "sid-p2")
+  insertSession("agent:main:subagent:ch4", "sid-ch4", { parentSessionKey: parent2, parentSessionId: "sid-p2" });
 
-  const counts = getChildCounts([parent1, parent2, noChildren]);
-  assert(counts.get(parent1) === 3, "parent1 has 3 children", `got ${counts.get(parent1)}`);
-  assert(counts.get(parent2) === 1, "parent2 has 1 child", `got ${counts.get(parent2)}`);
-  assert(!counts.has(noChildren) || counts.get(noChildren) === 0, "noChildren has 0 children");
+  // getChildCounts now takes session_ids, not session_keys
+  const counts = getChildCounts(["sid-p1", "sid-p2", "sid-nc"]);
+  assert(counts.get("sid-p1") === 3, "parent1 (sid-p1) has 3 children", `got ${counts.get("sid-p1")}`);
+  assert(counts.get("sid-p2") === 1, "parent2 (sid-p2) has 1 child", `got ${counts.get("sid-p2")}`);
+  assert(!counts.has("sid-nc") || counts.get("sid-nc") === 0, "noChildren has 0 children");
 
   // Empty input
   const emptyResult = getChildCounts([]);
@@ -170,22 +175,21 @@ console.log("\n=== Group 3: getChildCounts ===");
 console.log("\n=== Group 4: getChildSessions ===");
 // ================================================================
 {
-  // Use parent1 from Group 3 (still in DB)
-  const parent1 = "agent:main:feishu:group:parent-g1";
-  const children = getChildSessions(parent1);
+  // Use parent1 from Group 3 (still in DB) — query by session_id
+  const children = getChildSessions("sid-p1");
   assert(children.length === 3, "getChildSessions returns 3 children", `got ${children.length}`);
 
-  // All children should have correct parent
-  const allCorrectParent = children.every(c => c.parent_session_key === parent1);
-  assert(allCorrectParent, "all children point to correct parent");
+  // All children should have correct parent session_id
+  const allCorrectParent = children.every(c => c.parent_session_id === "sid-p1");
+  assert(allCorrectParent, "all children point to correct parent session_id");
 
   // Children are ordered by updated_at DESC
   const times = children.map(c => c.updated_at);
   const isSorted = times.every((t, i) => i === 0 || t <= times[i - 1]);
   assert(isSorted, "children ordered by updated_at DESC");
 
-  // No children for non-parent
-  const none = getChildSessions("nonexistent:parent");
+  // No children for non-parent session_id
+  const none = getChildSessions("nonexistent-sid");
   assert(none.length === 0, "getChildSessions for non-parent returns empty array");
 }
 
@@ -223,27 +227,31 @@ console.log("\n=== Group 5: readSessionStoreExtras extracts spawnedBy ===");
 
   const extras = readSessionStoreExtras();
 
-  // sub-x1: has both label and spawnedBy
+  // sub-x1: has both label and spawnedBy → parentSessionId resolved from parent's sessionId
   const ex1 = extras.get("agent:researcher:subagent:sub-x1");
   assert(ex1 !== undefined, "sub-x1 found in extras");
   assert(ex1?.label === "research sub 1", "sub-x1 label correct");
+  assert(ex1?.sessionId === "sid-x1", "sub-x1 own sessionId extracted");
   assert(
     ex1?.parentSessionKey === "agent:researcher:feishu:group:oc_fakechat1",
-    "sub-x1 spawnedBy extracted correctly",
+    "sub-x1 spawnedBy (key) extracted correctly",
+  );
+  assert(
+    ex1?.parentSessionId === "sid-gc1",
+    "sub-x1 parentSessionId resolved from parent entry",
+    `got ${ex1?.parentSessionId}`,
   );
 
   // top-level session: no spawnedBy
   const ex2 = extras.get("agent:researcher:feishu:group:oc_fakechat1");
   assert(ex2 !== undefined, "group session found in extras");
-  assert(ex2?.parentSessionKey === null, "group session has no parent (null)");
+  assert(ex2?.parentSessionKey === null, "group session has no parent key");
+  assert(ex2?.parentSessionId === null, "group session has no parent session_id");
 
-  // sub-x2: no label, has spawnedBy
+  // sub-x2: no label, has spawnedBy → parentSessionId also resolved
   const ex3 = extras.get("agent:researcher:subagent:sub-x2");
   assert(ex3?.label === null, "sub-x2 label is null");
-  assert(
-    ex3?.parentSessionKey === "agent:researcher:feishu:group:oc_fakechat1",
-    "sub-x2 spawnedBy extracted correctly",
-  );
+  assert(ex3?.parentSessionId === "sid-gc1", "sub-x2 parentSessionId resolved");
 }
 
 // ================================================================
@@ -257,19 +265,19 @@ console.log("\n=== Group 6: Chain relationship A -> B -> C ===");
   const c = "agent:main:subagent:chain-leaf";
 
   insertSession(a, "sid-a", { channel: "feishu-group" });
-  insertSession(b, "sid-b", { parentSessionKey: a });
-  insertSession(c, "sid-c", { parentSessionKey: b });
+  insertSession(b, "sid-b", { parentSessionKey: a, parentSessionId: "sid-a" });
+  insertSession(c, "sid-c", { parentSessionKey: b, parentSessionId: "sid-b" });
 
-  // A has 1 child (B), B has 1 child (C), C has 0
-  const counts = getChildCounts([a, b, c]);
-  assert(counts.get(a) === 1, "chain: A has 1 direct child", `got ${counts.get(a)}`);
-  assert(counts.get(b) === 1, "chain: B has 1 direct child", `got ${counts.get(b)}`);
-  assert(!counts.has(c) || counts.get(c) === 0, "chain: C has 0 children");
+  // A has 1 child (B), B has 1 child (C), C has 0 — queried by session_id
+  const counts = getChildCounts(["sid-a", "sid-b", "sid-c"]);
+  assert(counts.get("sid-a") === 1, "chain: A has 1 direct child", `got ${counts.get("sid-a")}`);
+  assert(counts.get("sid-b") === 1, "chain: B has 1 direct child", `got ${counts.get("sid-b")}`);
+  assert(!counts.has("sid-c") || counts.get("sid-c") === 0, "chain: C has 0 children");
 
   // B is simultaneously a child and a parent
-  const bRow = db.prepare("SELECT parent_session_key FROM sessions WHERE session_key = ?").get(b) as any;
-  assert(bRow.parent_session_key === a, "chain: B's parent is A");
-  const bChildren = getChildSessions(b);
+  const bRow = db.prepare("SELECT parent_session_id FROM sessions WHERE session_key = ?").get(b) as any;
+  assert(bRow.parent_session_id === "sid-a", "chain: B's parent is A (by session_id)");
+  const bChildren = getChildSessions("sid-b");
   assert(bChildren.length === 1 && bChildren[0].session_key === c, "chain: B's child is C");
 }
 
@@ -285,13 +293,13 @@ console.log("\n=== Group 7: cron :run:UUID parent matching ===");
   insertSession(cronBase, "sid-cb", { channel: "cron" });
   insertSession(cronRun, "sid-cr", { channel: "cron" });
 
-  // Sub spawned by the cron base
-  insertSession("agent:main:subagent:cron-sub-1", "sid-cs1", { parentSessionKey: cronBase });
+  // Sub spawned by the cron base session (linked by parent_session_id)
+  insertSession("agent:main:subagent:cron-sub-1", "sid-cs1", { parentSessionKey: cronBase, parentSessionId: "sid-cb" });
 
-  const counts = getChildCounts([cronBase, cronRun]);
-  assert(counts.get(cronBase) === 1, "cron base key has 1 child", `got ${counts.get(cronBase)}`);
-  // :run: variant is NOT the parent — child points to base key
-  assert(!counts.has(cronRun) || counts.get(cronRun) === 0, "cron :run: variant has 0 children");
+  // getChildCounts by session_id
+  const counts = getChildCounts(["sid-cb", "sid-cr"]);
+  assert(counts.get("sid-cb") === 1, "cron base session has 1 child", `got ${counts.get("sid-cb")}`);
+  assert(!counts.has("sid-cr") || counts.get("sid-cr") === 0, "cron :run: session has 0 children");
 }
 
 // ================================================================
@@ -308,20 +316,22 @@ console.log("\n=== Group 8: updateSessionParent only writes when NULL ===");
   insertSession(key, "sid-g1");
 
   // First write succeeds
-  updateSessionParent(key, parent1);
-  let row = db.prepare("SELECT parent_session_key FROM sessions WHERE session_key = ?").get(key) as any;
-  assert(row.parent_session_key === parent1, "guard: first write sets parent");
+  updateSessionParent(key, parent1, "sid-parent1");
+  let row = db.prepare("SELECT parent_session_key, parent_session_id FROM sessions WHERE session_key = ?").get(key) as any;
+  assert(row.parent_session_key === parent1, "guard: first write sets parent key");
+  assert(row.parent_session_id === "sid-parent1", "guard: first write sets parent session_id");
 
-  // Second write with different parent is a no-op
-  updateSessionParent(key, parent2);
-  row = db.prepare("SELECT parent_session_key FROM sessions WHERE session_key = ?").get(key) as any;
-  assert(row.parent_session_key === parent1, "guard: second write does NOT change parent");
+  // Second write with different parent is a no-op (key already set)
+  updateSessionParent(key, parent2, "sid-parent2");
+  row = db.prepare("SELECT parent_session_key, parent_session_id FROM sessions WHERE session_key = ?").get(key) as any;
+  assert(row.parent_session_key === parent1, "guard: second write does NOT change parent key");
 
   // Force-clear parent via raw SQL, then write again
-  db.prepare("UPDATE sessions SET parent_session_key = NULL WHERE session_key = ?").run(key);
-  updateSessionParent(key, parent2);
-  row = db.prepare("SELECT parent_session_key FROM sessions WHERE session_key = ?").get(key) as any;
+  db.prepare("UPDATE sessions SET parent_session_key = NULL, parent_session_id = NULL WHERE session_key = ?").run(key);
+  updateSessionParent(key, parent2, "sid-parent2");
+  row = db.prepare("SELECT parent_session_key, parent_session_id FROM sessions WHERE session_key = ?").get(key) as any;
   assert(row.parent_session_key === parent2, "guard: write succeeds after clearing to NULL");
+  assert(row.parent_session_id === "sid-parent2", "guard: session_id also set after clear");
 }
 
 // ================================================================
@@ -339,16 +349,17 @@ console.log("\n=== Group 9: getParentInfoBatch ===");
   insertSession(parent2, "sid-ip2", { channel: "cron", agentId: "researcher" });
   db.prepare("UPDATE sessions SET diag = 'cron:deadbeef' WHERE session_key = ?").run(parent2);
 
-  const info = getParentInfoBatch([parent1, parent2, "nonexistent:key"]);
+  // getParentInfoBatch now takes session_ids
+  const info = getParentInfoBatch(["sid-ip1", "sid-ip2", "nonexistent-sid"]);
 
   assert(info.size === 2, "getParentInfoBatch returns 2 results (ignores nonexistent)");
 
-  const p1 = info.get(parent1);
+  const p1 = info.get("sid-ip1");
   assert(p1?.label === "My Research Group", "parent1 label is correct");
   assert(p1?.diag === "group:oc_abc123", "parent1 diag is correct");
   assert(p1?.agentId === "main", "parent1 agentId is correct");
 
-  const p2 = info.get(parent2);
+  const p2 = info.get("sid-ip2");
   assert(p2?.label === null, "parent2 label is null (not set)");
   assert(p2?.diag === "cron:deadbeef", "parent2 diag is correct");
   assert(p2?.agentId === "researcher", "parent2 agentId is correct");

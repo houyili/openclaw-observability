@@ -153,48 +153,60 @@ export function updateSessionLabel(sessionKey: string, label: string): void {
   getDb().prepare("UPDATE sessions SET label = ? WHERE session_key = ?").run(label, sessionKey);
 }
 
-/** Only set parent if not already set (spawnedBy never changes). */
-export function updateSessionParent(sessionKey: string, parentSessionKey: string): void {
-  getDb().prepare("UPDATE sessions SET parent_session_key = ? WHERE session_key = ? AND parent_session_key IS NULL").run(parentSessionKey, sessionKey);
+/** Set parent info. parent_session_key is write-once; parent_session_id can be backfilled later. */
+export function updateSessionParent(sessionKey: string, parentSessionKey: string, parentSessionId: string | null): void {
+  const db = getDb();
+  // Set parent_session_key (write-once)
+  db.prepare(`
+    UPDATE sessions SET parent_session_key = ?
+    WHERE session_key = ? AND parent_session_key IS NULL
+  `).run(parentSessionKey, sessionKey);
+  // Backfill parent_session_id (may arrive later when parent entry appears in sessions.json)
+  if (parentSessionId) {
+    db.prepare(`
+      UPDATE sessions SET parent_session_id = ?
+      WHERE session_key = ? AND parent_session_id IS NULL
+    `).run(parentSessionId, sessionKey);
+  }
 }
 
 /**
- * Count direct children for each session key in a batch.
- * Returns a map: parentSessionKey → childCount.
+ * Count direct children for each parent session_id in a batch.
+ * Returns a map: parentSessionId → childCount.
  */
-export function getChildCounts(parentKeys: string[]): Map<string, number> {
+export function getChildCounts(parentSessionIds: string[]): Map<string, number> {
   const db = getDb();
   const map = new Map<string, number>();
-  if (parentKeys.length === 0) return map;
-  const stmt = db.prepare("SELECT COUNT(DISTINCT session_key) as cnt FROM sessions WHERE parent_session_key = ?");
-  for (const pk of parentKeys) {
-    const row = stmt.get(pk) as any;
-    if (row && row.cnt > 0) map.set(pk, row.cnt);
+  if (parentSessionIds.length === 0) return map;
+  const stmt = db.prepare("SELECT COUNT(DISTINCT session_key) as cnt FROM sessions WHERE parent_session_id = ?");
+  for (const pid of parentSessionIds) {
+    const row = stmt.get(pid) as any;
+    if (row && row.cnt > 0) map.set(pid, row.cnt);
   }
   return map;
 }
 
 /**
  * Batch-fetch parent session info for display (diag, label, agentId).
- * Returns a map: parentSessionKey → { diag, label, agentId }.
+ * Returns a map: parentSessionId → { diag, label, agentId }.
  */
-export function getParentInfoBatch(parentKeys: string[]): Map<string, { diag: string; label: string | null; agentId: string }> {
+export function getParentInfoBatch(parentSessionIds: string[]): Map<string, { diag: string; label: string | null; agentId: string }> {
   const db = getDb();
   const map = new Map<string, { diag: string; label: string | null; agentId: string }>();
-  if (parentKeys.length === 0) return map;
-  const stmt = db.prepare("SELECT diag, label, agent_id FROM sessions WHERE session_key = ? LIMIT 1");
-  for (const pk of parentKeys) {
-    const row = stmt.get(pk) as any;
-    if (row) map.set(pk, { diag: row.diag || "", label: row.label || null, agentId: row.agent_id || "" });
+  if (parentSessionIds.length === 0) return map;
+  const stmt = db.prepare("SELECT diag, label, agent_id FROM sessions WHERE session_id = ? LIMIT 1");
+  for (const pid of parentSessionIds) {
+    const row = stmt.get(pid) as any;
+    if (row) map.set(pid, { diag: row.diag || "", label: row.label || null, agentId: row.agent_id || "" });
   }
   return map;
 }
 
 /**
- * Get child sessions for a given parent session key.
+ * Get child sessions for a given parent session_id.
  */
-export function getChildSessions(parentKey: string): SessionRow[] {
-  return getDb().prepare("SELECT * FROM sessions WHERE parent_session_key = ? ORDER BY updated_at DESC").all(parentKey) as SessionRow[];
+export function getChildSessions(parentSessionId: string): SessionRow[] {
+  return getDb().prepare("SELECT * FROM sessions WHERE parent_session_id = ? ORDER BY updated_at DESC").all(parentSessionId) as SessionRow[];
 }
 
 export function updateSessionBlocker(sessionKey: string, blocker: string, blockTs: number): void {
@@ -311,6 +323,7 @@ export interface SessionRow {
   age_ms: number;
   source: string;
   parent_session_key: string | null;
+  parent_session_id: string | null;
 }
 
 export interface SessionListResult {
@@ -323,38 +336,14 @@ export interface SessionListResult {
 export function getAllSessions(filters?: {
   channel?: string; agent?: string; state?: string; q?: string;
   diag?: string; label?: string;
-  parentKey?: string;  // filter to children of this parent session
+  parentKey?: string;  // filter to children by parent session_key (legacy)
+  parentId?: string;   // filter to children by parent session_id (preferred)
   isCron?: boolean;  // true = only cron, false = exclude cron, undefined = all
   page?: number; pageSize?: number;
 }): SessionListResult {
   const db = getDb();
   let sql = "SELECT * FROM sessions WHERE 1=1";
   let countSql = "SELECT COUNT(*) as total FROM sessions WHERE 1=1";
-  const params: any[] = [];
-  const countParams: any[] = [];
-
-  function addFilter(clause: string, value: any) {
-    sql += clause; params.push(value);
-    countSql += clause; countParams.push(value);
-  }
-
-  if (filters?.isCron === true) addFilter(" AND channel = ?", "cron");
-  else if (filters?.isCron === false) addFilter(" AND channel != ?", "cron");
-
-  if (filters?.channel) addFilter(" AND channel = ?", filters.channel);
-  if (filters?.agent) addFilter(" AND agent_id = ?", filters.agent);
-  if (filters?.state) addFilter(" AND diag_state = ?", filters.state);
-  if (filters?.diag) addFilter(" AND diag LIKE ?", `%${filters.diag}%`);
-  if (filters?.label) addFilter(" AND label LIKE ?", `%${filters.label}%`);
-  if (filters?.q) addFilter(" AND (session_key LIKE ? OR label LIKE ?)", `%${filters.q}%`);
-  if (filters?.q) countParams.push(`%${filters.q}%`); // second param for OR
-
-  // Fix: the q filter adds 2 params to sql but we only pushed 1 to countSql
-  // Actually let me redo this properly
-  // Reset and rebuild cleanly
-
-  sql = "SELECT * FROM sessions WHERE 1=1";
-  countSql = "SELECT COUNT(*) as total FROM sessions WHERE 1=1";
   const p: any[] = [];
 
   if (filters?.isCron === true) { sql += " AND channel = 'cron'"; countSql += " AND channel = 'cron'"; }
@@ -365,11 +354,12 @@ export function getAllSessions(filters?: {
   if (filters?.state) { sql += " AND diag_state = ?"; countSql += " AND diag_state = ?"; p.push(filters.state); }
   if (filters?.diag) { sql += " AND diag LIKE ?"; countSql += " AND diag LIKE ?"; p.push(`%${filters.diag}%`); }
   if (filters?.label) { sql += " AND label LIKE ?"; countSql += " AND label LIKE ?"; p.push(`%${filters.label}%`); }
-  if (filters?.parentKey) { sql += " AND parent_session_key = ?"; countSql += " AND parent_session_key = ?"; p.push(filters.parentKey); }
+  if (filters?.parentId) { sql += " AND parent_session_id = ?"; countSql += " AND parent_session_id = ?"; p.push(filters.parentId); }
+  else if (filters?.parentKey) { sql += " AND parent_session_key = ?"; countSql += " AND parent_session_key = ?"; p.push(filters.parentKey); }
   if (filters?.q) {
-    const clause = " AND (session_key LIKE ? OR label LIKE ?)";
+    const clause = " AND (session_key LIKE ? OR label LIKE ? OR session_id LIKE ?)";
     sql += clause; countSql += clause;
-    p.push(`%${filters.q}%`, `%${filters.q}%`);
+    p.push(`%${filters.q}%`, `%${filters.q}%`, `%${filters.q}%`);
   }
 
   const total = (db.prepare(countSql).get(...p) as any).total;
