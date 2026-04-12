@@ -14,7 +14,6 @@ let currentSubTab = 'sessions'; // 'sessions' (non-cron) or 'cron'
 let currentPage = 1;
 let expandedSessionKey = null;
 let selectedRunId = null; // null = latest run
-let currentDetailView = 'trace'; // Round 6: 'trace' | 'context'
 
 // ─── Tab switching ──────────────────────────────────────────────
 document.querySelectorAll('button.tab').forEach(btn => {
@@ -184,7 +183,7 @@ async function refreshSessions() {
     ` : `<span class="page-info">${data.total} sessions</span>`;
   }
 
-  if (expandedSessionKey) refreshTrace(expandedSessionKey);
+  if (expandedSessionKey) refreshDetail(expandedSessionKey);
 }
 
 window.toggleSession = async function(key) {
@@ -192,13 +191,11 @@ window.toggleSession = async function(key) {
   if (expandedSessionKey === key) {
     expandedSessionKey = null;
     selectedRunId = null;
-    currentDetailView = 'trace';
     detail.classList.add('hidden');
     return;
   }
   expandedSessionKey = key;
   selectedRunId = null;
-  currentDetailView = 'trace';
   detail.classList.remove('hidden');
   await refreshDetail(key);
 };
@@ -208,23 +205,36 @@ window.selectRun = function(runId) {
   if (expandedSessionKey) refreshDetail(expandedSessionKey);
 };
 
-// Round 6 — switch between Workflow trace view and Context length view
-window.selectDetailView = function(view) {
-  if (view !== 'trace' && view !== 'context') return;
-  currentDetailView = view;
-  if (expandedSessionKey) refreshDetail(expandedSessionKey);
-};
-
+// Stacked detail: Workflow trace (top) + Context length (bottom), both refreshed together.
 async function refreshDetail(key) {
-  if (currentDetailView === 'context') return refreshContext(key);
-  return refreshTrace(key);
-}
+  const detail = document.getElementById('session-detail');
+  const runParam = selectedRunId ? `&runId=${encodeURIComponent(selectedRunId)}` : '';
+  const [traceRes, ctxRes] = await Promise.all([
+    authFetch(`/api/sessions/${encodeURIComponent(key)}/trace?${runParam}`).catch(() => null),
+    authFetch(`/api/sessions/${encodeURIComponent(key)}/context?${runParam}`).catch(() => null),
+  ]);
 
-function renderViewSelector(activeView) {
-  return `<div class="view-selector">
-    <button class="view-item${activeView === 'trace' ? ' view-active' : ''}" onclick="selectDetailView('trace')">Workflow trace</button>
-    <button class="view-item${activeView === 'context' ? ' view-active' : ''}" onclick="selectDetailView('context')">Context length</button>
-  </div>`;
+  let traceData = null;
+  if (traceRes && traceRes.ok) { try { traceData = await traceRes.json(); } catch { /* swallow */ } }
+  let ctxData = null;
+  if (ctxRes && ctxRes.ok) { try { ctxData = await ctxRes.json(); } catch { /* swallow */ } }
+
+  // Run selector comes from whichever endpoint actually returned runs.
+  const runs = (traceData?.runs?.length ? traceData.runs : ctxData?.runs) || [];
+  const activeRunId = traceData?.runId || ctxData?.runId || null;
+
+  let html = renderRunSelector(runs, activeRunId);
+  html += '<div class="detail-section detail-section-trace">';
+  html += '<div class="detail-section-title">Workflow trace</div>';
+  html += traceData ? buildTraceHtml(traceData) : '<div class="trace-header">No trace data for this run</div>';
+  html += '</div>';
+  html += '<div class="detail-section detail-section-context">';
+  html += '<div class="detail-section-title">Context length</div>';
+  html += ctxData?.breakdown && ctxData?.timeline
+    ? renderContextView(ctxData.breakdown, ctxData.timeline)
+    : '<div class="trace-header">No context data for this run</div>';
+  html += '</div>';
+  detail.innerHTML = html;
 }
 
 function renderRunSelector(runs, activeRunId) {
@@ -243,20 +253,12 @@ function renderRunSelector(runs, activeRunId) {
   return html;
 }
 
-async function refreshTrace(key) {
-  const detail = document.getElementById('session-detail');
-  const runParam = selectedRunId ? `&runId=${encodeURIComponent(selectedRunId)}` : '';
-  const res = await authFetch(`/api/sessions/${encodeURIComponent(key)}/trace?${runParam}`);
-  const data = await res.json();
+function buildTraceHtml(data) {
   const spans = data.spans || [];
-  const runs = data.runs || [];
-
-  let html = renderViewSelector('trace') + renderRunSelector(runs, data.runId);
-
-  if (!spans.length) { detail.innerHTML = html + '<div class="trace-header">No trace data for this run</div>'; return; }
+  if (!spans.length) return '<div class="trace-header">No trace data for this run</div>';
 
   const totalMs = data.traceDurationMs || 1;
-  html += `<div class="trace-header">
+  let html = `<div class="trace-header">
     <strong>Run:</strong> ${esc(data.runId?.slice(0,8))} &middot;
     <strong>Started:</strong> ${new Date(data.startedAt).toLocaleString()} &middot;
     <strong>Duration:</strong> ${fmtDur(data.traceDurationMs)} &middot;
@@ -296,7 +298,7 @@ async function refreshTrace(key) {
     }
   }
   html += `</div>`; // close trace-container
-  detail.innerHTML = html;
+  return html;
 }
 
 window.toggleDetail = function(id) {
@@ -311,27 +313,6 @@ function getDepth(span, spans) {
 }
 
 // ─── Round 6 — Context Length view ──────────────────────────────
-
-async function refreshContext(key) {
-  const detail = document.getElementById('session-detail');
-  const runParam = selectedRunId ? `&runId=${encodeURIComponent(selectedRunId)}` : '';
-  const res = await authFetch(`/api/sessions/${encodeURIComponent(key)}/context?${runParam}`);
-  if (!res.ok) {
-    detail.innerHTML = renderViewSelector('context') + '<div class="trace-header">No context data for this run</div>';
-    return;
-  }
-  const data = await res.json();
-  const runs = data.runs || [];
-  const breakdown = data.breakdown;
-  const timeline = data.timeline;
-  if (!breakdown || !timeline) {
-    detail.innerHTML = renderViewSelector('context') + renderRunSelector(runs, data.runId)
-      + '<div class="trace-header">No context data for this run</div>';
-    return;
-  }
-  detail.innerHTML = renderViewSelector('context') + renderRunSelector(runs, data.runId)
-    + renderContextView(breakdown, timeline);
-}
 
 function renderContextView(breakdown, timeline) {
   const peakInput = timeline.cumulative.peakInputTokens || 1;

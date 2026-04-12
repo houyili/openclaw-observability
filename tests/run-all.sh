@@ -10,6 +10,8 @@
 #                     (context-length.test.ts) — hermetic
 #   cli-commands    — Round 6 §5 channel CLI subcommand handlers
 #                     (cli-commands.test.ts) — hermetic
+#   frontend-detail — Round 6 follow-up: stacked trace+context detail view
+#                     (frontend-detail-view.test.ts) — hermetic
 #   integrity       — schema + value invariants over LIVE obs.db
 #                     (data-integrity.test.ts)
 #   live-e2e        — top-N live sessions: transcript → clean parse → DB
@@ -19,7 +21,7 @@
 #   perf            — wall-clock + CPU budgets for hot paths (perf-bench.ts)
 #
 # Hermetic suites (no live obs-v2 service or live transcripts needed):
-#   unit, invariants, fixture, auth-stale, context-length, cli-commands
+#   unit, invariants, fixture, auth-stale, context-length, cli-commands, frontend-detail
 #
 # Live suites (need a running obs-v2 + ~/.openclaw/agents/<agent>/sessions/):
 #   integrity, live-e2e, replay, cross-check, perf
@@ -37,7 +39,7 @@ NODE_BIN="${NODE_BIN:-$HOME/.local/bin/node}"
 [ -x "$NODE_BIN" ] || NODE_BIN="node"
 NODE_FLAGS="--experimental-sqlite --experimental-strip-types --no-warnings"
 
-FILTER="${TEST_FILTER:-unit invariants fixture auth-stale context-length cli-commands integrity live-e2e replay cross-check perf}"
+FILTER="${TEST_FILTER:-unit invariants fixture auth-stale context-length cli-commands frontend-detail integrity live-e2e replay cross-check perf}"
 
 total_fail=0
 run_suite() {
@@ -64,6 +66,7 @@ run_suite "fixture"         "tests/fixture-ingest.test.ts"
 run_suite "auth-stale"      "tests/auth-stale.test.ts"
 run_suite "context-length"  "tests/context-length.test.ts"
 run_suite "cli-commands"    "tests/cli-commands.test.ts"
+run_suite "frontend-detail" "tests/frontend-detail-view.test.ts"
 run_suite "integrity"       "tests/data-integrity.test.ts"
 run_suite "live-e2e"        "tests/live-e2e.test.ts"
 run_suite "replay"          "tests/replay-verify.ts"
