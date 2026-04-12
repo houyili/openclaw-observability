@@ -55,8 +55,27 @@ function extractSessionIdFromFile(filePath: string): string {
 }
 
 // In-memory map: sessionId (UUID) → sessionKey (agent:main:...)
-// Built once at startup from sessions.json store files.
+// Rebuilt periodically so that subagents spawned AFTER obs-v2 startup
+// are discoverable. The cache has a TTL — `resolveSessionKey` triggers
+// a rebuild when the map is stale.
 let sessionIdToKeyMap: Map<string, string> | null = null;
+let sessionIdMapBuiltAt = 0;
+const SESSION_ID_MAP_TTL_MS = 30_000; // rebuild every 30 s at most
+
+function getSessionIdMap(): Map<string, string> {
+  const now = Date.now();
+  if (!sessionIdToKeyMap || now - sessionIdMapBuiltAt > SESSION_ID_MAP_TTL_MS) {
+    sessionIdToKeyMap = buildSessionIdMap();
+    sessionIdMapBuiltAt = now;
+  }
+  return sessionIdToKeyMap;
+}
+
+/** Test-only: force the next getSessionIdMap() call to rebuild from disk. */
+export function _resetSessionIdMapForTest(): void {
+  sessionIdToKeyMap = null;
+  sessionIdMapBuiltAt = 0;
+}
 
 function buildSessionIdMap(): Map<string, string> {
   const map = new Map<string, string>();
@@ -83,9 +102,10 @@ function buildSessionIdMap(): Map<string, string> {
 }
 
 function resolveSessionKey(sessionId: string, db: any): string {
-  // 1. Check in-memory map (built from sessions.json — has ALL sessions)
-  if (!sessionIdToKeyMap) sessionIdToKeyMap = buildSessionIdMap();
-  const fromMap = sessionIdToKeyMap.get(sessionId);
+  // 1. Check in-memory map (built from sessions.json — has ALL sessions).
+  //    Uses getSessionIdMap() which rebuilds periodically so that subagents
+  //    spawned after obs-v2 startup are discoverable.
+  const fromMap = getSessionIdMap().get(sessionId);
   if (fromMap) {
     // Strip ":run:UUID" suffix — the auth CLI returns base keys without it
     const baseKey = fromMap.replace(/:run:[a-f0-9-]+$/, "");
@@ -167,10 +187,22 @@ export function startTranscriptWatcher(callbacks: WatcherCallbacks): { stop: () 
     }
 
     // Determine session key (first time we see this file, or after restart).
+    // Re-resolve if the cached key looks like a raw UUID (fallback from a
+    // previous tick where the sessions.json map hadn't been populated yet —
+    // happens when a subagent is spawned after obs-v2 startup).
+    const sessionId = extractSessionIdFromFile(filePath);
     let sessionKey = cachedKey;
-    if (!sessionKey) {
-      const sessionId = extractSessionIdFromFile(filePath);
-      sessionKey = resolveSessionKey(sessionId, db);
+    const isRawUuid = cachedKey && /^[0-9a-f]{8}-[0-9a-f]{4}-/.test(cachedKey) && !cachedKey.includes(":");
+    if (!sessionKey || isRawUuid) {
+      const resolved = resolveSessionKey(sessionId, db);
+      if (resolved !== sessionId || !sessionKey) {
+        // Found a proper key, or first time — use it.
+        // If key changed, we need to re-home existing steps.
+        if (sessionKey && sessionKey !== resolved) {
+          db.prepare("UPDATE steps SET session_key = ? WHERE session_key = ?").run(resolved, sessionKey);
+        }
+        sessionKey = resolved;
+      }
     }
 
     const runs = parseTranscript(entries, sessionKey);

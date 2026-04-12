@@ -57,10 +57,27 @@ export function recomputeAllSessionCounts(): void {
       COUNT(*) as total
     FROM steps WHERE session_key = ?
   `);
+  // Token aggregation: take the last assistant turn's cumulative totals.
+  // The API's usage.totalTokens on each assistant message is cumulative for
+  // the session, so the MAX across all MODEL_THINK/REPLY rows is the best
+  // approximation of session-level token usage.
+  const tokenStmt = db.prepare(`
+    SELECT
+      MAX(total_tokens)  as total_tok,
+      MAX(input_tokens)  as input_tok,
+      SUM(CASE WHEN node_type IN ('MODEL_THINK','REPLY') THEN output_tokens ELSE 0 END) as output_tok,
+      MAX(CASE WHEN node_type IN ('MODEL_THINK','REPLY') THEN input_tokens ELSE 0 END) as context_tok
+    FROM steps WHERE session_key = ? AND total_tokens IS NOT NULL
+  `);
   // Fan-out: update both exact-match (direct sessions) AND all :run:UUID variants.
+  // Token fields are only backfilled when the auth-poller left them at 0 or NULL.
   const updateStmt = db.prepare(`
     UPDATE sessions SET
       llm_call_count = ?, tool_call_count = ?, skill_call_count = ?, mcp_call_count = ?,
+      total_tokens   = CASE WHEN COALESCE(total_tokens, 0) = 0 THEN ? ELSE total_tokens END,
+      input_tokens   = CASE WHEN COALESCE(input_tokens, 0) = 0 THEN ? ELSE input_tokens END,
+      output_tokens  = CASE WHEN COALESCE(output_tokens, 0) = 0 THEN ? ELSE output_tokens END,
+      context_tokens = CASE WHEN COALESCE(context_tokens, 0) = 0 THEN ? ELSE context_tokens END,
       source = CASE WHEN ? > 0 THEN 'transcript+auth' ELSE source END
     WHERE session_key = ? OR session_key LIKE ?
   `);
@@ -68,8 +85,11 @@ export function recomputeAllSessionCounts(): void {
   for (const baseKey of baseKeys) {
     const row = aggStmt.get(baseKey) as any;
     if (!row) continue;
+    const tok = tokenStmt.get(baseKey) as any;
     updateStmt.run(
-      row.llm || 0, row.tool || 0, row.skill || 0, row.mcp || 0, row.total || 0,
+      row.llm || 0, row.tool || 0, row.skill || 0, row.mcp || 0,
+      tok?.total_tok || 0, tok?.input_tok || 0, tok?.output_tok || 0, tok?.context_tok || 0,
+      row.total || 0,
       baseKey, baseKey + ":run:%",
     );
   }
@@ -101,13 +121,29 @@ export function recomputeSessionCounts(sessionKey: string): void {
     FROM steps WHERE session_key = ?
   `).get(baseKey) as any;
   if (!row) return;
+
+  // Token aggregation from steps (backfill when auth-poller left values at 0).
+  const tok = db.prepare(`
+    SELECT
+      MAX(total_tokens)  as total_tok,
+      MAX(input_tokens)  as input_tok,
+      SUM(CASE WHEN node_type IN ('MODEL_THINK','REPLY') THEN output_tokens ELSE 0 END) as output_tok,
+      MAX(CASE WHEN node_type IN ('MODEL_THINK','REPLY') THEN input_tokens ELSE 0 END) as context_tok
+    FROM steps WHERE session_key = ? AND total_tokens IS NOT NULL
+  `).get(baseKey) as any;
+
   db.prepare(`
     UPDATE sessions SET
       llm_call_count = ?, tool_call_count = ?, skill_call_count = ?, mcp_call_count = ?,
+      total_tokens   = CASE WHEN COALESCE(total_tokens, 0) = 0 THEN ? ELSE total_tokens END,
+      input_tokens   = CASE WHEN COALESCE(input_tokens, 0) = 0 THEN ? ELSE input_tokens END,
+      output_tokens  = CASE WHEN COALESCE(output_tokens, 0) = 0 THEN ? ELSE output_tokens END,
+      context_tokens = CASE WHEN COALESCE(context_tokens, 0) = 0 THEN ? ELSE context_tokens END,
       source = CASE WHEN ? > 0 THEN 'transcript+auth' ELSE source END
     WHERE session_key = ? OR session_key LIKE ?
   `).run(
     row.llm || 0, row.tool || 0, row.skill || 0, row.mcp || 0,
+    tok?.total_tok || 0, tok?.input_tok || 0, tok?.output_tok || 0, tok?.context_tok || 0,
     row.total || 0,
     baseKey, baseKey + ":run:%",
   );
