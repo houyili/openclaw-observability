@@ -36,6 +36,7 @@ document.querySelectorAll('.sub-tab').forEach(btn => {
     btn.classList.add('active');
     currentSubTab = btn.dataset.subtab;
     currentPage = 1;
+    activeParentKeyFilter = null;
     refresh();
   });
 });
@@ -76,6 +77,73 @@ function activityBars(bars) {
   const cls = ['act-idle', 'act-busy', 'act-stuck', 'act-error'];
   return '<span class="act-bars">' + bars.map(v => `<span class="act-bar ${cls[v]||cls[0]}"></span>`).join('') + '</span>';
 }
+
+/**
+ * Build a compact, human-readable label for a parent session.
+ * Priority: label > diag > parsed-from-key > truncated key.
+ */
+function parentDisplayName(s) {
+  // Use label if the parent has one
+  if (s.parentLabel) {
+    const l = s.parentLabel;
+    return l.length > 20 ? l.slice(0, 18) + '..' : l;
+  }
+  // Use diag (already short: "group:oc_1e24", "user:ou_64bc", "cron:188f")
+  if (s.parentDiag) return s.parentDiag;
+  // Fallback: parse the key
+  if (!s.parentSessionKey) return '';
+  const p = s.parentSessionKey.split(':');
+  // "agent:researcher:feishu:group:oc_xxx" → "feishu:group"
+  if (p.length >= 4) return p[2] + ':' + p[3];
+  return p.slice(-2).join(':');
+}
+
+function renderParentChild(s) {
+  const parts = [];
+  if (s.parentSessionKey) {
+    const name = parentDisplayName(s);
+    // Only show agent prefix if parent is a different agent than child
+    const agentPrefix = (s.parentAgentId && s.parentAgentId !== s.agentId)
+      ? esc(s.parentAgentId) + '/' : '';
+    parts.push(
+      `<span class="parent-badge" title="${esc(s.parentSessionKey)}" `
+      + `onclick="event.stopPropagation();filterToSession('${esc(s.parentSessionKey)}')">`
+      + `^ ${agentPrefix}${esc(name)}</span>`
+    );
+  }
+  if (s.childCount > 0) {
+    parts.push(
+      `<span class="child-badge" `
+      + `onclick="event.stopPropagation();filterChildren('${esc(s.sessionKey)}')">`
+      + `${s.childCount} sub</span>`
+    );
+  }
+  return parts.length > 0 ? parts.join(' ') : '-';
+}
+
+/** Active parentKey filter — set when user clicks "N sub" badge. */
+let activeParentKeyFilter = null;
+
+/** Filter session list to show a specific session (e.g. jump to parent). */
+window.filterToSession = function(key) {
+  clearParentFilter();
+  const qInput = document.getElementById('filter-q');
+  if (qInput) { qInput.value = key.slice(-20); currentPage = 1; refresh(); }
+};
+/** Filter session list to show children of a parent session. */
+window.filterChildren = function(parentKey) {
+  activeParentKeyFilter = parentKey;
+  // Clear other filters so children are visible regardless of channel/state
+  const channelSel = document.getElementById('filter-channel');
+  const stateSel = document.getElementById('filter-state');
+  const qInput = document.getElementById('filter-q');
+  if (channelSel) channelSel.value = '';
+  if (stateSel) stateSel.value = '';
+  if (qInput) qInput.value = '';
+  currentPage = 1;
+  refresh();
+};
+function clearParentFilter() { activeParentKeyFilter = null; }
 
 // ─── Summary Cards ──────────────────────────────────────────────
 async function refreshSummary() {
@@ -122,6 +190,7 @@ async function refreshSessions() {
   if (diag) params.set('diag', diag);
   if (label) params.set('label', label);
   if (q) params.set('q', q);
+  if (activeParentKeyFilter) params.set('parentKey', activeParentKeyFilter);
 
   const res = await authFetch('/api/sessions?' + params);
   const data = await res.json();
@@ -141,6 +210,18 @@ async function refreshSessions() {
     });
   }
 
+  // Parent-filter banner
+  const bannerEl = document.getElementById('parent-filter-banner');
+  if (bannerEl) {
+    if (activeParentKeyFilter) {
+      const short = activeParentKeyFilter.length > 50 ? '...' + activeParentKeyFilter.slice(-40) : activeParentKeyFilter;
+      bannerEl.innerHTML = `<span>Showing children of: <strong>${esc(short)}</strong></span> <button onclick="clearParentFilter();refresh();">clear</button>`;
+      bannerEl.classList.remove('hidden');
+    } else {
+      bannerEl.classList.add('hidden');
+    }
+  }
+
   tbody.innerHTML = data.sessions.map(s => {
     const keyShort = s.sessionKey.length > 45 ? '...' + s.sessionKey.slice(-40) : s.sessionKey;
     const modelShort = s.model ? s.model.replace(/^gpt-/, '').split('-').slice(0, 2).join('-') : '';
@@ -154,6 +235,7 @@ async function refreshSessions() {
       <td class="text-sm">${esc(s.diag || '-')}</td>
       <td>${esc(s.label || '-')}</td>
       <td>${badge(s.channel, s.channel?.includes('feishu') ? 'processing' : s.channel === 'cron' ? 'waiting' : 'default')}</td>
+      <td class="text-sm">${renderParentChild(s)}</td>
       <td>${esc(s.kind)}</td>
       <td>${badge(s.source || 'auth-only', s.source === 'transcript+auth' ? 'active' : 'default')}</td>
       <td>${badge(s.diagState || 'idle', s.diagState || 'idle')}</td>

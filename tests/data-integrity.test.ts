@@ -379,6 +379,54 @@ console.log("\n=== E. Round 6: Context Length live invariants ===");
   }
 }
 
+// ─── F. Round 7: Parent-child relationship integrity ───────────
+console.log("\n=== F. Round 7: Parent-child session integrity ===");
+{
+  // F.1 Every parent_session_key should reference an existing session_key
+  const orphans = db.prepare(`
+    SELECT DISTINCT s.parent_session_key
+    FROM sessions s
+    WHERE s.parent_session_key IS NOT NULL
+    AND s.parent_session_key NOT IN (SELECT DISTINCT session_key FROM sessions)
+  `).all() as any[];
+  assert(orphans.length === 0,
+    "F.1: no orphaned parent_session_key references",
+    orphans.length > 0 ? `${orphans.length} orphans: ${orphans.map((o: any) => o.parent_session_key).slice(0, 3).join(", ")}` : undefined);
+
+  // F.2 COUNT(DISTINCT session_key) == COUNT(*) for child rows (no multi-session_id inflation)
+  const inflation = db.prepare(`
+    SELECT parent_session_key,
+      COUNT(*) as total_rows,
+      COUNT(DISTINCT session_key) as distinct_keys
+    FROM sessions
+    WHERE parent_session_key IS NOT NULL
+    GROUP BY parent_session_key
+    HAVING total_rows != distinct_keys
+  `).all() as any[];
+  assert(inflation.length === 0,
+    "F.2: child COUNT(*) matches COUNT(DISTINCT session_key) for all parents",
+    inflation.length > 0 ? `${inflation.length} parents with inflated counts` : undefined);
+
+  // F.3 Subagent sessions have parent_session_key set (coverage check)
+  const subagentTotal = (db.prepare(
+    "SELECT COUNT(DISTINCT session_key) as n FROM sessions WHERE channel = 'subagent'"
+  ).get() as any).n;
+  const subagentWithParent = (db.prepare(
+    "SELECT COUNT(DISTINCT session_key) as n FROM sessions WHERE channel = 'subagent' AND parent_session_key IS NOT NULL"
+  ).get() as any).n;
+  // We expect most subagents to have a parent — warn if coverage is low but don't hard-fail
+  // because sessions.json may have been cleaned up for old sessions
+  const coverage = subagentTotal > 0 ? subagentWithParent / subagentTotal : 1;
+  assert(coverage >= 0.5,
+    `F.3: subagent parent coverage >= 50% (${subagentWithParent}/${subagentTotal} = ${(coverage * 100).toFixed(0)}%)`,
+    `only ${(coverage * 100).toFixed(0)}% of subagent sessions have a parent`);
+
+  // F.4 idx_sessions_parent index exists
+  const indexes = db.prepare("PRAGMA index_list(sessions)").all() as any[];
+  assert(indexes.some((idx: any) => idx.name === "idx_sessions_parent"),
+    "F.4: idx_sessions_parent index exists");
+}
+
 db.close();
 
 // ─── Summary ────────────────────────────────────────────────────

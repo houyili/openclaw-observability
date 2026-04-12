@@ -95,12 +95,16 @@ function migrate(db: DatabaseSync): void {
   // nullable so the migration is backward-compatible: existing rows stay
   // NULL until the next service restart triggers Round 2's first-tick
   // full-file reparse, at which point they get backfilled in place.
+  // Round 7 — parent-child session relationship from sessions.json spawnedBy.
+  ensureColumn(db, "sessions", "parent_session_key", "TEXT");
+
   ensureColumn(db, "steps", "input_tokens",       "INTEGER");  // usage.input on MODEL_THINK / REPLY
   ensureColumn(db, "steps", "cache_read_tokens",  "INTEGER");  // usage.cacheRead on MODEL_THINK / REPLY
   ensureColumn(db, "steps", "thinking_text_len",  "INTEGER");  // chars in content[].type='thinking'
   ensureColumn(db, "steps", "reply_text_len",     "INTEGER");  // full chars of REPLY text content
 
   // Indexes
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_sessions_parent ON sessions(parent_session_key) WHERE parent_session_key IS NOT NULL`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_steps_session_run ON steps(session_key, run_id, seq)`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_steps_ts ON steps(ts_epoch_ms)`);
   // Covers `WHERE session_key = ? ORDER BY ts_epoch_ms DESC LIMIT 1` which powers

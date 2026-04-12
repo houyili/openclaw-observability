@@ -1,5 +1,5 @@
 import type { ServerResponse } from "node:http";
-import { getAllSessions, getSession } from "../storage/sessions-repo.ts";
+import { getAllSessions, getSession, getChildCounts, getParentInfoBatch } from "../storage/sessions-repo.ts";
 import { getLatestRun, getRunList, getTraceSpans, getActivityBars } from "../storage/steps-repo.ts";
 import { getContextBoth } from "../storage/context-repo.ts";
 
@@ -16,10 +16,17 @@ export const handleSessionsRoutes = {
       q: query.q,
       diag: query.diag,
       label: query.label,
+      parentKey: query.parentKey,
       isCron,
       page: query.page ? parseInt(query.page) : 1,
       pageSize: query.pageSize ? parseInt(query.pageSize) : pageSize,
     });
+
+    // Batch-fetch child counts and parent display info for all sessions on this page.
+    const allKeys = sessions.map(s => s.session_key);
+    const childCounts = getChildCounts(allKeys);
+    const parentKeys = [...new Set(sessions.map(s => s.parent_session_key).filter(Boolean))] as string[];
+    const parentInfo = getParentInfoBatch(parentKeys);
 
     const result = sessions.map(s => {
       const latestRun = getLatestRun(s.session_key);
@@ -56,6 +63,11 @@ export const handleSessionsRoutes = {
         lastBlockDurationMs,
         ageMs: s.age_ms,
         updatedAt: s.updated_at,
+        parentSessionKey: s.parent_session_key || null,
+        parentDiag: s.parent_session_key ? (parentInfo.get(s.parent_session_key)?.diag || null) : null,
+        parentLabel: s.parent_session_key ? (parentInfo.get(s.parent_session_key)?.label || null) : null,
+        parentAgentId: s.parent_session_key ? (parentInfo.get(s.parent_session_key)?.agentId || null) : null,
+        childCount: childCounts.get(s.session_key) || 0,
         latestRun: latestRun ? {
           runId: latestRun.run_id,
           startedAt: latestRun.started_at,

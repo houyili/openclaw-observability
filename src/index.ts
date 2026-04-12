@@ -5,7 +5,7 @@ import { startTranscriptWatcher } from "./ingest/transcript-watcher.ts";
 import { pollAuthSessionsAsync, readSessionStoreExtras } from "./ingest/auth-poller.ts";
 import { readLatestOtelStates } from "./ingest/otel-reader.ts";
 import { scanAll } from "./ingest/registry-scanner.ts";
-import { upsertAuthSessions, recomputeSessionCounts, recomputeAllSessionCounts, recomputeAllSessionOps, updateSessionDiagState, updateSessionLabel, updateSessionBlocker } from "./storage/sessions-repo.ts";
+import { upsertAuthSessions, recomputeSessionCounts, recomputeAllSessionCounts, recomputeAllSessionOps, updateSessionDiagState, updateSessionLabel, updateSessionParent, updateSessionBlocker } from "./storage/sessions-repo.ts";
 import { upsertSteps } from "./storage/steps-repo.ts";
 import { upsertRegistryEntries, touchRegistryEntry } from "./storage/registry-repo.ts";
 import { startServer } from "./api/server.ts";
@@ -30,10 +30,11 @@ function doAuthPoll(): void {
       if (sessions.length > 0) {
         upsertAuthSessions(sessions);
       }
-      // Enrich with label from session store (not available in CLI --json)
+      // Enrich with label + parent from session store (not available in CLI --json)
       const extras = readSessionStoreExtras();
       for (const [key, extra] of extras) {
         if (extra.label) updateSessionLabel(key, extra.label);
+        if (extra.parentSessionKey) updateSessionParent(key, extra.parentSessionKey);
       }
     } catch (err) {
       console.error("[auth-poller] Error:", (err as Error).message);

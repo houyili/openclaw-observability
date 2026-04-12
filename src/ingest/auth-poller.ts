@@ -195,8 +195,8 @@ function parseChannel(key: string): string {
  * Read session store files to get label and other fields not in CLI --json.
  * Returns a map: sessionKey → {label, ...}
  */
-export function readSessionStoreExtras(): Map<string, { label: string | null }> {
-  const map = new Map<string, { label: string | null }>();
+export function readSessionStoreExtras(): Map<string, { label: string | null; parentSessionKey: string | null }> {
+  const map = new Map<string, { label: string | null; parentSessionKey: string | null }>();
   const agentsDir = CONFIG.AGENTS_DIR;
   if (!existsSync(agentsDir)) return map;
 
@@ -212,6 +212,7 @@ export function readSessionStoreExtras(): Map<string, { label: string | null }> 
         const e = entry as Record<string, unknown>;
         map.set(key, {
           label: typeof e.label === "string" ? e.label : null,
+          parentSessionKey: typeof e.spawnedBy === "string" ? e.spawnedBy : null,
         });
       }
     } catch { /* skip unreadable stores */ }

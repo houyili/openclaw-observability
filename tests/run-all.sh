@@ -16,6 +16,8 @@
 #                     raw-UUID re-homing (watcher-rehome.test.ts) — hermetic
 #   token-backfill  — recomputeSessionCounts token backfill from steps
 #                     (token-backfill.test.ts) — hermetic
+#   parent-child    — parent-child session relationship from sessions.json
+#                     spawnedBy (parent-child.test.ts) — hermetic
 #   integrity       — schema + value invariants over LIVE obs.db
 #                     (data-integrity.test.ts)
 #   live-e2e        — top-N live sessions: transcript → clean parse → DB
@@ -25,7 +27,7 @@
 #   perf            — wall-clock + CPU budgets for hot paths (perf-bench.ts)
 #
 # Hermetic suites (no live obs-v2 service or live transcripts needed):
-#   unit, invariants, fixture, auth-stale, context-length, cli-commands, frontend-detail, watcher-rehome, token-backfill
+#   unit, invariants, fixture, auth-stale, context-length, cli-commands, frontend-detail, watcher-rehome, token-backfill, parent-child
 #
 # Live suites (need a running obs-v2 + ~/.openclaw/agents/<agent>/sessions/):
 #   integrity, live-e2e, replay, cross-check, perf
@@ -43,7 +45,7 @@ NODE_BIN="${NODE_BIN:-$HOME/.local/bin/node}"
 [ -x "$NODE_BIN" ] || NODE_BIN="node"
 NODE_FLAGS="--experimental-sqlite --experimental-strip-types --no-warnings"
 
-FILTER="${TEST_FILTER:-unit invariants fixture auth-stale context-length cli-commands frontend-detail watcher-rehome token-backfill integrity live-e2e replay cross-check perf}"
+FILTER="${TEST_FILTER:-unit invariants fixture auth-stale context-length cli-commands frontend-detail watcher-rehome token-backfill parent-child integrity live-e2e replay cross-check perf}"
 
 total_fail=0
 run_suite() {
@@ -73,6 +75,7 @@ run_suite "cli-commands"    "tests/cli-commands.test.ts"
 run_suite "frontend-detail" "tests/frontend-detail-view.test.ts"
 run_suite "watcher-rehome"  "tests/watcher-rehome.test.ts"
 run_suite "token-backfill"  "tests/token-backfill.test.ts"
+run_suite "parent-child"   "tests/parent-child.test.ts"
 run_suite "integrity"       "tests/data-integrity.test.ts"
 run_suite "live-e2e"        "tests/live-e2e.test.ts"
 run_suite "replay"          "tests/replay-verify.ts"
