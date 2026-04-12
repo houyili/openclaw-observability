@@ -268,6 +268,10 @@ function getTurnCacheReadTokens(t: Turn): number {
   return t.anchor.cache_read_tokens || 0;
 }
 
+function getTurnPromptTokens(t: Turn): number {
+  return getTurnInputTokens(t) + getTurnCacheReadTokens(t);
+}
+
 function getTurnTotalTokens(t: Turn): number {
   return t.anchor.total_tokens || 0;
 }
@@ -322,8 +326,8 @@ export function getContextBreakdown(
 
   const resolvedRunId = rows[0].run_id;
 
-  const baseline = getTurnInputTokens(turns[0]);
-  const totalLatest = getTurnInputTokens(turns[turns.length - 1]);
+  const baseline = getTurnPromptTokens(turns[0]);
+  const totalLatest = getTurnPromptTokens(turns[turns.length - 1]);
 
   const turnRows: ContextBreakdown["turns"] = [];
   let assistantOutputsCumulative = 0;
@@ -335,6 +339,8 @@ export function getContextBreakdown(
     const t = turns[i];
     const inputTokens = getTurnInputTokens(t);
     const outputTokens = getTurnOutputTokens(t);
+
+    const promptTokens = getTurnPromptTokens(t);
 
     if (i === 0) {
       turnRows.push({
@@ -348,9 +354,9 @@ export function getContextBreakdown(
       continue;
     }
 
-    const prevInput = getTurnInputTokens(turns[i - 1]);
+    const prevPrompt = getTurnPromptTokens(turns[i - 1]);
     const prevOutput = getTurnOutputTokens(turns[i - 1]);
-    const deltaFromPrev = inputTokens - prevInput;
+    const deltaFromPrev = promptTokens - prevPrompt;
 
     const toolResultChars = getTurnPrevToolResultChars(t);
     const toolResultsApprox = Math.round(toolResultChars / 4);
@@ -420,7 +426,9 @@ export function getContextTimeline(
     const t = turns[i];
     const prim = getTurnPrimaryTool(t);
     const inputTokens = getTurnInputTokens(t);
-    const prevInput = i > 0 ? getTurnInputTokens(turns[i - 1]) : 0;
+    const cacheReadTokens = getTurnCacheReadTokens(t);
+    const promptTokens = inputTokens + cacheReadTokens;
+    const prevPrompt = i > 0 ? getTurnPromptTokens(turns[i - 1]) : 0;
 
     turnRows.push({
       seq: t.anchor.seq,
@@ -429,8 +437,8 @@ export function getContextTimeline(
       totalTokens: getTurnTotalTokens(t),
       inputTokens,
       outputTokens: getTurnOutputTokens(t),
-      cacheReadTokens: getTurnCacheReadTokens(t),
-      deltaIn: i > 0 ? inputTokens - prevInput : null,
+      cacheReadTokens,
+      deltaIn: i > 0 ? promptTokens - prevPrompt : null,
       primaryTool: prim.name,
       primaryToolKind: prim.kind,
       prevToolResultChars: getTurnPrevToolResultChars(t),
@@ -465,17 +473,21 @@ export function getContextTimeline(
     .reduce((n, r) => n + (r.reply_text_len || 0), 0);
 
   const peakInputTokens = turnRows.reduce(
-    (m, t) => Math.max(m, t.inputTokens),
+    (m, t) => Math.max(m, t.inputTokens + t.cacheReadTokens),
     0,
   );
-  const finalInputTokens = turnRows[turnRows.length - 1]?.inputTokens || 0;
-  const totalInputCumulative = turnRows.reduce((n, t) => n + t.inputTokens, 0);
+  const finalInputTokens =
+    (turnRows[turnRows.length - 1]?.inputTokens || 0) +
+    (turnRows[turnRows.length - 1]?.cacheReadTokens || 0);
+  const totalInputCumulative = turnRows.reduce(
+    (n, t) => n + t.inputTokens + t.cacheReadTokens,
+    0,
+  );
   const totalCacheReadCumulative = turnRows.reduce(
     (n, t) => n + t.cacheReadTokens,
     0,
   );
-  const cacheDenom = totalInputCumulative + totalCacheReadCumulative;
-  const cacheHitRate = cacheDenom > 0 ? totalCacheReadCumulative / cacheDenom : null;
+  const cacheHitRate = totalInputCumulative > 0 ? totalCacheReadCumulative / totalInputCumulative : null;
 
   // ─── Top-N single-point spikes ────────────────────────────────
   const spikes = turnRows

@@ -370,11 +370,11 @@ console.log("\n=== E. Round 6: Context Length live invariants ===");
     }
 
     const dbPeak = (db.prepare(`
-      SELECT MAX(input_tokens) as p FROM steps
+      SELECT MAX(input_tokens + COALESCE(cache_read_tokens, 0)) as p FROM steps
       WHERE session_key = ? AND run_id = ? AND input_tokens IS NOT NULL
     `).get(r.session_key, r.run_id) as any).p;
     assert(timeline.cumulative.peakInputTokens === dbPeak,
-      `${tag}: timeline peakInputTokens == MAX(input_tokens)`,
+      `${tag}: timeline peakInputTokens == MAX(input_tokens + cache_read_tokens)`,
       `timeline=${timeline.cumulative.peakInputTokens} db=${dbPeak}`);
   }
 }

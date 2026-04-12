@@ -366,7 +366,7 @@ function renderContextView(breakdown, timeline) {
   // Per-turn timeline table (postmortem-style)
   html += `<div class="context-section-title">Per-turn timeline</div>`;
   html += '<div class="context-turn-table-wrap"><table class="context-turn-table">';
-  html += '<thead><tr><th>Turn</th><th>Tool</th><th>Δin</th><th>in</th><th>cR</th><th>out</th><th>prevTR</th><th>think</th><th>note</th></tr></thead><tbody>';
+  html += '<thead><tr><th>Turn</th><th>Tool</th><th>Δctx</th><th>in</th><th>cR</th><th>out</th><th>prevTR</th><th>think</th><th>note</th></tr></thead><tbody>';
   for (const t of timeline.turns) {
     const deltaCls = t.deltaIn == null ? '' : (t.deltaIn > 5000 ? 'delta-spike' : (t.deltaIn < 0 ? 'delta-neg' : ''));
     const deltaStr = t.deltaIn == null ? '—' : (t.deltaIn >= 0 ? '+' : '') + t.deltaIn.toLocaleString();

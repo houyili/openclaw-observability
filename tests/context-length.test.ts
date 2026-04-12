@@ -64,6 +64,7 @@ console.log("\n=== Group 1: Schema migration ===");
 //
 // Turn 0: a0 — usage.input=10000  output=200  cacheRead=0   thinking=10
 // Turn 1: a1 — usage.input=11500  output=180  cacheRead=10000 thinking=13
+//   prompt₁ = in + cR = 11500 + 10000 = 21500
 //   prevToolResults: 1 result of 1200 chars (300 tokens) from a0's read
 //   tool call. a1's tool call is feishu_search_doc_wiki (MCP_CALL),
 //   so the parser sets a1's tool_call row's context_token_delta =
@@ -72,24 +73,26 @@ console.log("\n=== Group 1: Schema migration ===");
 //     priorOutput contribution: 200
 //     toolResultsCharApprox: 1200/4 = 300
 //     mcpDelta: 1500
-//     Δin = 1500
-//     unaccounted = 1500 - 200 - 300 - 1500 = -500
+//     Δctx = prompt₁ - prompt₀ = 21500 - 10000 = 11500
+//     unaccounted = 11500 - 200 - 300 - 1500 = 9500
 // Turn 2: a2 — usage.input=12300  output=80   cacheRead=11500 thinking=10
+//   prompt₂ = 12300 + 11500 = 23800
 //   prevToolResults: 1 result of 800 chars (200 tokens) from a1's MCP call
 //   a2's tool call is `read` (TOOL_CALL, not MCP_CALL), no contextTokenDelta
 //     priorOutput: 180
 //     toolResults: 200
 //     mcpDelta: 0
-//     Δin = 800
-//     unaccounted = 800 - 180 - 200 - 0 = 420
+//     Δctx = 23800 - 21500 = 2300
+//     unaccounted = 2300 - 180 - 200 - 0 = 1920
 // Turn 3: a3 — MODEL_THINK + REPLY, input=12500 output=50 cacheRead=12300
+//   prompt₃ = 12500 + 12300 = 24800
 //   thinking=5 replyText=120. Both rows are folded into 1 turn by
 //   groupTurns (Round 6 fix).
 //     priorOutput: 80
 //     toolResults: 0 (r2 was empty)
 //     mcpDelta: 0
-//     Δin = 200
-//     unaccounted = 200 - 80 - 0 - 0 = 120
+//     Δctx = 24800 - 23800 = 1000
+//     unaccounted = 1000 - 80 - 0 - 0 = 920
 
 const sessionKey = "agent:test:context";
 const fixtureEntries: any[] = [
@@ -171,9 +174,9 @@ console.log("\n=== Group 3: getContextBreakdown ===");
 const breakdown = getContextBreakdown(sessionKey, "u1");
 assert(breakdown != null, "getContextBreakdown returns a result");
 if (breakdown) {
-  assert(breakdown.totalLatest === 12500, "totalLatest == 12500 (last assistant.input)",
+  assert(breakdown.totalLatest === 24800, "totalLatest == 24800 (last prompt = in + cR = 12500 + 12300)",
     `got ${breakdown.totalLatest}`);
-  assert(breakdown.frameworkBaseline === 10000, "frameworkBaseline == 10000",
+  assert(breakdown.frameworkBaseline === 10000, "frameworkBaseline == 10000 (in₀ + cR₀ = 10000 + 0)",
     `got ${breakdown.frameworkBaseline}`);
   assert(breakdown.turns.length === 4, "4 turns in breakdown",
     `got ${breakdown.turns.length}`);
@@ -183,39 +186,41 @@ if (breakdown) {
   assert(breakdown.turns[0].contributors === null, "turn 0 contributors is null");
   assert(breakdown.turns[0].inputTokens === 10000, "turn 0 inputTokens == 10000");
 
-  // Turn 1: Δ = 1500, priorOutput=200, toolResults=1200/4=300,
-  // mcpDelta=1500 (a1's tool call is feishu_search_doc_wiki = MCP_CALL,
-  // and the parser stamps context_token_delta = a1.input - a0.input = 1500
-  // on it). unaccounted = 1500 - 200 - 300 - 1500 = -500
+  // Turn 1: Δctx = prompt₁ - prompt₀ = 21500 - 10000 = 11500
+  // priorOutput=200, toolResults=300, mcpDelta=1500
+  // unaccounted = 11500 - 200 - 300 - 1500 = 9500
   const t1 = breakdown.turns[1];
-  assert(t1.deltaFromPrev === 1500, "turn 1 deltaFromPrev == 1500", `got ${t1.deltaFromPrev}`);
+  assert(t1.deltaFromPrev === 11500, "turn 1 deltaFromPrev == 11500 (Δprompt)", `got ${t1.deltaFromPrev}`);
   assert(t1.contributors?.priorOutput === 200, "turn 1 priorOutput == 200");
   assert(t1.contributors?.toolResultsCharApprox === 300, "turn 1 toolResultsCharApprox == 300");
   assert(t1.contributors?.mcpDelta === 1500,
     "turn 1 mcpDelta == 1500 (MCP_CALL row carries context_token_delta)",
     `got ${t1.contributors?.mcpDelta}`);
-  assert(t1.contributors?.unaccounted === -500,
-    "turn 1 unaccounted == 1500 - 200 - 300 - 1500 = -500",
+  assert(t1.contributors?.unaccounted === 9500,
+    "turn 1 unaccounted == 11500 - 200 - 300 - 1500 = 9500",
     `got ${t1.contributors?.unaccounted}`);
 
-  // Turn 2: Δ=800, priorOutput=180, toolResults=200, mcpDelta=0
-  // (a2's tool call is `read`, not MCP). unaccounted = 800 - 180 - 200 - 0 = 420
+  // Turn 2: Δctx = 23800 - 21500 = 2300
+  // priorOutput=180, toolResults=200, mcpDelta=0
+  // unaccounted = 2300 - 180 - 200 - 0 = 1920
   const t2 = breakdown.turns[2];
-  assert(t2.deltaFromPrev === 800, "turn 2 deltaFromPrev == 800");
+  assert(t2.deltaFromPrev === 2300, "turn 2 deltaFromPrev == 2300", `got ${t2.deltaFromPrev}`);
   assert(t2.contributors?.priorOutput === 180, "turn 2 priorOutput == 180");
   assert(t2.contributors?.toolResultsCharApprox === 200, "turn 2 toolResultsCharApprox == 200");
   assert(t2.contributors?.mcpDelta === 0, "turn 2 mcpDelta == 0 (a2's tool is read, not MCP)");
-  assert(t2.contributors?.unaccounted === 420,
-    "turn 2 unaccounted == 800 - 180 - 200 - 0 = 420",
+  assert(t2.contributors?.unaccounted === 1920,
+    "turn 2 unaccounted == 2300 - 180 - 200 - 0 = 1920",
     `got ${t2.contributors?.unaccounted}`);
 
-  // Turn 3: REPLY, Δ = 200, priorOutput=80, toolResults=0/4=0, mcpDelta=0
-  //   unaccounted = 200 - 80 - 0 - 0 = 120
+  // Turn 3: Δctx = 24800 - 23800 = 1000
+  // priorOutput=80, toolResults=0, mcpDelta=0
+  // unaccounted = 1000 - 80 - 0 - 0 = 920
   const t3 = breakdown.turns[3];
-  assert(t3.deltaFromPrev === 200, "turn 3 deltaFromPrev == 200");
+  assert(t3.deltaFromPrev === 1000, "turn 3 deltaFromPrev == 1000", `got ${t3.deltaFromPrev}`);
   assert(t3.contributors?.priorOutput === 80, "turn 3 priorOutput == 80");
   assert(t3.contributors?.toolResultsCharApprox === 0, "turn 3 toolResultsCharApprox == 0 (empty result)");
-  assert(t3.contributors?.unaccounted === 120, "turn 3 unaccounted == 120");
+  assert(t3.contributors?.unaccounted === 920, "turn 3 unaccounted == 920",
+    `got ${t3.contributors?.unaccounted}`);
 
   // Sanity invariant: baseline + Σ Δ == totalLatest
   const sumDelta = breakdown.turns.slice(1)
@@ -228,7 +233,7 @@ if (breakdown) {
   // assistantOutputs = 200 + 180 + 80 = 460  (priorOutput at each Δ)
   // toolResults = 300 + 200 + 0 = 500
   // mcpDeltas = 1500 + 0 + 0 = 1500
-  // unaccounted = -500 + 420 + 120 = 40
+  // unaccounted = 9500 + 1920 + 920 = 12340
   assert(breakdown.buckets.assistantOutputsCumulative === 460,
     "buckets.assistantOutputsCumulative == 460",
     `got ${breakdown.buckets.assistantOutputsCumulative}`);
@@ -238,8 +243,8 @@ if (breakdown) {
   assert(breakdown.buckets.mcpDeltasCumulative === 1500,
     "buckets.mcpDeltasCumulative == 1500",
     `got ${breakdown.buckets.mcpDeltasCumulative}`);
-  assert(breakdown.buckets.unaccountedCumulative === 40,
-    "buckets.unaccountedCumulative == -500 + 420 + 120 = 40",
+  assert(breakdown.buckets.unaccountedCumulative === 12340,
+    "buckets.unaccountedCumulative == 9500 + 1920 + 920 = 12340",
     `got ${breakdown.buckets.unaccountedCumulative}`);
 }
 
@@ -253,9 +258,12 @@ if (timeline) {
   // Per-turn cumulative checks
   const tt = timeline.turns;
   assert(tt[0].deltaIn === null, "turn 0 deltaIn == null");
-  assert(tt[1].deltaIn === 1500, "turn 1 deltaIn == 1500");
-  assert(tt[2].deltaIn === 800, "turn 2 deltaIn == 800");
-  assert(tt[3].deltaIn === 200, "turn 3 deltaIn == 200");
+  assert(tt[1].deltaIn === 11500, "turn 1 deltaIn == 11500 (Δprompt = 21500 - 10000)",
+    `got ${tt[1].deltaIn}`);
+  assert(tt[2].deltaIn === 2300, "turn 2 deltaIn == 2300 (Δprompt = 23800 - 21500)",
+    `got ${tt[2].deltaIn}`);
+  assert(tt[3].deltaIn === 1000, "turn 3 deltaIn == 1000 (Δprompt = 24800 - 23800)",
+    `got ${tt[3].deltaIn}`);
 
   // primaryTool detection
   assert(tt[0].primaryTool === "read", "turn 0 primaryTool == read");
@@ -294,9 +302,13 @@ if (timeline) {
     "cumulative.totalOutputTokens == 1020 (parent + per-tool double, intentional)",
     `got ${timeline.cumulative.totalOutputTokens}`);
 
-  // peak input
-  assert(timeline.cumulative.peakInputTokens === 12500, "cumulative.peakInputTokens == 12500");
-  assert(timeline.cumulative.finalInputTokens === 12500, "cumulative.finalInputTokens == 12500");
+  // peak input (in + cR): max of 10000, 21500, 23800, 24800 = 24800
+  assert(timeline.cumulative.peakInputTokens === 24800,
+    "cumulative.peakInputTokens == 24800 (prompt-based)",
+    `got ${timeline.cumulative.peakInputTokens}`);
+  assert(timeline.cumulative.finalInputTokens === 24800,
+    "cumulative.finalInputTokens == 24800 (prompt-based)",
+    `got ${timeline.cumulative.finalInputTokens}`);
 
   // total reply text chars across the run = 120
   assert(timeline.cumulative.totalReplyTextChars === 120,
@@ -311,10 +323,10 @@ if (timeline) {
   assert(timeline.cumulative.totalToolResultChars === 2000,
     "cumulative.totalToolResultChars == 2000");
 
-  // cache hit rate: cR_total / (in_total + cR_total)
+  // cache hit rate: cR_total / prompt_total
   // cR_total = 0 + 10000 + 11500 + 12300 = 33800
-  // in_total = 10000 + 11500 + 12300 + 12500 = 46300
-  // hit = 33800 / (46300 + 33800) = 33800 / 80100 ≈ 0.4220
+  // prompt_total = (10000+0) + (11500+10000) + (12300+11500) + (12500+12300) = 80100
+  // hit = 33800 / 80100 ≈ 0.4220
   const expectedHit = 33800 / 80100;
   assert(
     timeline.cumulative.cacheHitRate != null &&
@@ -323,12 +335,12 @@ if (timeline) {
     `got ${timeline.cumulative.cacheHitRate}`,
   );
 
-  // Top spikes — sorted by deltaIn DESC: turn 1 (1500), turn 2 (800), turn 3 (200)
+  // Top spikes — sorted by deltaIn DESC: turn 1 (11500), turn 2 (2300), turn 3 (1000)
   assert(timeline.topSpikes.length === 3, "3 spikes (turns with positive deltaIn)");
-  assert(timeline.topSpikes[0].seq === tt[1].seq && timeline.topSpikes[0].deltaIn === 1500,
-    "top spike #1 is turn 1 with +1500");
-  assert(timeline.topSpikes[1].seq === tt[2].seq && timeline.topSpikes[1].deltaIn === 800,
-    "top spike #2 is turn 2 with +800");
+  assert(timeline.topSpikes[0].seq === tt[1].seq && timeline.topSpikes[0].deltaIn === 11500,
+    "top spike #1 is turn 1 with +11500");
+  assert(timeline.topSpikes[1].seq === tt[2].seq && timeline.topSpikes[1].deltaIn === 2300,
+    "top spike #2 is turn 2 with +2300");
 }
 
 // ─── Group 5: Death-loop heuristic detection ────────────────────
@@ -407,11 +419,11 @@ console.log("\n=== Group 6: HTTP route handler ===");
   if (payload) {
     assert(payload.breakdown != null, "payload has breakdown");
     assert(payload.timeline != null, "payload has timeline");
-    assert(payload.breakdown.totalLatest === 12500,
-      "handler breakdown.totalLatest matches storage repo (12500)",
+    assert(payload.breakdown.totalLatest === 24800,
+      "handler breakdown.totalLatest matches storage repo (24800)",
       `got ${payload.breakdown?.totalLatest}`);
-    assert(payload.timeline.cumulative.peakInputTokens === 12500,
-      "handler timeline.cumulative.peakInputTokens matches storage repo (12500)",
+    assert(payload.timeline.cumulative.peakInputTokens === 24800,
+      "handler timeline.cumulative.peakInputTokens matches storage repo (24800)",
       `got ${payload.timeline?.cumulative?.peakInputTokens}`);
     assert(payload.runId === "u1", "handler runId matches the requested run");
   }
@@ -424,6 +436,109 @@ console.log("\n=== Group 6: HTTP route handler ===");
   assert(status404 === 404, "unknown session/run returns 404",
     `got status ${status404}`);
   assert(payload404?.error != null, "404 payload carries an error message");
+}
+
+// ─── Group 7: Cache-aware Δctx correctness ─────────────────────
+// Builds a transcript where cache toggling makes the old Δ(input-only)
+// go wildly negative, but Δ(in+cR) = Δ(prompt) stays correctly positive
+// and monotonic. This verifies the fix for the user-reported "fake
+// negative deltas" bug.
+console.log("\n=== Group 7: Cache-aware Δctx ===");
+{
+  const cacheEntries: any[] = [
+    { type: "message", id: "uC", parentId: "", timestamp: "2026-04-12T00:00:00.000Z",
+      message: { role: "user", content: [{ type: "text", text: "start" }] } },
+    // Turn 0: cold cache — all 20000 tokens are uncached
+    { type: "message", id: "cA0", parentId: "uC", timestamp: "2026-04-12T00:00:01.000Z",
+      message: { role: "assistant", content: [
+        { type: "toolCall", name: "read", id: "cTC0", arguments: { file_path: "/tmp/a" } },
+      ], usage: { input: 20000, output: 300, cacheRead: 0, totalTokens: 20300 } } },
+    { type: "message", id: "cR0", parentId: "cA0", timestamp: "2026-04-12T00:00:02.000Z",
+      message: { role: "toolResult", content: [{ type: "text", text: "a".repeat(2000) }] } },
+    // Turn 1: cache HOT — 20000 tokens now cached, only 800 new uncached
+    // Old Δin = 800 - 20000 = −19200 (!!!). Prompt Δ = 20800 - 20000 = 800. ✅
+    { type: "message", id: "cA1", parentId: "cR0", timestamp: "2026-04-12T00:00:03.000Z",
+      message: { role: "assistant", content: [
+        { type: "toolCall", name: "read", id: "cTC1", arguments: { file_path: "/tmp/b" } },
+      ], usage: { input: 800, output: 200, cacheRead: 20000, totalTokens: 21000 } } },
+    { type: "message", id: "cR1", parentId: "cA1", timestamp: "2026-04-12T00:00:04.000Z",
+      message: { role: "toolResult", content: [{ type: "text", text: "b".repeat(1600) }] } },
+    // Turn 2: cache still hot, grew slightly.
+    // Old Δin = 1200 - 800 = +400. Prompt Δ = 22000 - 20800 = 1200. ✅
+    { type: "message", id: "cA2", parentId: "cR1", timestamp: "2026-04-12T00:00:05.000Z",
+      message: { role: "assistant", content: [
+        { type: "toolCall", name: "exec", id: "cTC2", arguments: { command: "ls" } },
+      ], usage: { input: 1200, output: 150, cacheRead: 20800, totalTokens: 22150 } } },
+    { type: "message", id: "cR2", parentId: "cA2", timestamp: "2026-04-12T00:00:06.000Z",
+      message: { role: "toolResult", content: [{ type: "text", text: "c".repeat(400) }] } },
+    // Turn 3: cache COLD (evicted, e.g. 5-min TTL expired or different prefix).
+    // All 22400 are uncached again.
+    // Old Δin = 22400 - 1200 = +21200 (spike!). Prompt Δ = 22400 - 22000 = 400. ✅
+    { type: "message", id: "cA3", parentId: "cR2", timestamp: "2026-04-12T00:00:07.000Z",
+      message: { role: "assistant", content: [
+        { type: "text", text: "done" },
+      ], usage: { input: 22400, output: 40, cacheRead: 0, totalTokens: 22440 } } },
+  ];
+
+  const cacheRun = parseTranscript(cacheEntries, "agent:test:cache")[0];
+  upsertSteps(cacheRun);
+
+  const bd = getContextBreakdown("agent:test:cache", "uC");
+  assert(bd != null, "cache breakdown exists");
+  if (bd) {
+    // Prompt values: turn0=20000, turn1=20800, turn2=22000, turn3=22400
+    assert(bd.frameworkBaseline === 20000, "cache: baseline == 20000",
+      `got ${bd.frameworkBaseline}`);
+    assert(bd.totalLatest === 22400, "cache: totalLatest == 22400",
+      `got ${bd.totalLatest}`);
+    assert(bd.turns.length === 4, "cache: 4 turns");
+
+    // Δctx for each turn (all positive — no fake negatives!)
+    assert(bd.turns[1].deltaFromPrev === 800,
+      "cache: turn 1 Δctx == 800 (NOT −19200)",
+      `got ${bd.turns[1].deltaFromPrev}`);
+    assert(bd.turns[2].deltaFromPrev === 1200,
+      "cache: turn 2 Δctx == 1200",
+      `got ${bd.turns[2].deltaFromPrev}`);
+    assert(bd.turns[3].deltaFromPrev === 400,
+      "cache: turn 3 Δctx == 400 (NOT +21200 spike)",
+      `got ${bd.turns[3].deltaFromPrev}`);
+
+    // All deltas are positive — monotonic prompt growth
+    for (let i = 1; i < bd.turns.length; i++) {
+      assert((bd.turns[i].deltaFromPrev ?? 0) >= 0,
+        `cache: turn ${i} Δctx ≥ 0 (no fake negatives)`,
+        `got ${bd.turns[i].deltaFromPrev}`);
+    }
+
+    // Sanity invariant
+    const sum = bd.turns.slice(1).reduce((s, t) => s + (t.deltaFromPrev || 0), 0);
+    assert(bd.frameworkBaseline + sum === bd.totalLatest,
+      "cache: baseline + Σ Δ == totalLatest",
+      `${bd.frameworkBaseline} + ${sum} = ${bd.frameworkBaseline + sum}, expected ${bd.totalLatest}`);
+  }
+
+  const tl = getContextTimeline("agent:test:cache", "uC");
+  assert(tl != null, "cache timeline exists");
+  if (tl) {
+    // No spikes > 5000 in Δctx (max delta = 1200)
+    assert(tl.topSpikes.every((s: any) => s.deltaIn <= 5000),
+      "cache: no fake spikes from cache-cold/hot transitions");
+
+    // peakInputTokens = max prompt = 22400
+    assert(tl.cumulative.peakInputTokens === 22400,
+      "cache: peakInputTokens == 22400 (prompt-based)",
+      `got ${tl.cumulative.peakInputTokens}`);
+
+    // Cache hit rate: cR = 0+20000+20800+0 = 40800
+    // prompt = 20000+20800+22000+22400 = 85200
+    // rate = 40800/85200 ≈ 0.4789
+    const expectRate = 40800 / 85200;
+    assert(tl.cumulative.cacheHitRate != null &&
+      Math.abs(tl.cumulative.cacheHitRate - expectRate) < 1e-6,
+      `cache: cacheHitRate ≈ ${expectRate.toFixed(4)}`,
+      `got ${tl.cumulative.cacheHitRate}`);
+  }
 }
 
 // Cleanup
