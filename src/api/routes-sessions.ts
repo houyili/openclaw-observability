@@ -1,7 +1,7 @@
 import type { ServerResponse } from "node:http";
 import { getAllSessions, getSession } from "../storage/sessions-repo.ts";
 import { getLatestRun, getRunList, getTraceSpans, getActivityBars } from "../storage/steps-repo.ts";
-import { getContextBreakdown, getContextTimeline } from "../storage/context-repo.ts";
+import { getContextBoth } from "../storage/context-repo.ts";
 
 type SendJson = (res: ServerResponse, data: unknown, status?: number) => void;
 
@@ -185,11 +185,11 @@ export const handleSessionsRoutes = {
    *   → 404 if no MODEL_THINK rows
    */
   context(key: string, query: Record<string, string>, res: ServerResponse, sendJson: SendJson) {
-    const breakdown = getContextBreakdown(key, query.runId);
-    if (!breakdown) {
+    const result = getContextBoth(key, query.runId);
+    if (!result) {
       return sendJson(res, { error: "No assistant turns found for this run" }, 404);
     }
-    const timeline = getContextTimeline(key, query.runId);
+    const { breakdown, timeline } = result;
     const runs = getRunList(key);
 
     sendJson(res, {

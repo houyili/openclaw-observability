@@ -91,7 +91,7 @@ export const handleStuck: Handler = (_db, _args) => {
 export const handleTop: Handler = (db, _args) => {
   const oneDayAgo = Date.now() - 86_400_000;
   const rows = db.prepare(`
-    SELECT session_key, total_tokens, model
+    SELECT session_key, MAX(total_tokens) as total_tokens, MAX(model) as model
     FROM sessions
     WHERE updated_at >= ? AND channel != 'cron'
     GROUP BY session_key

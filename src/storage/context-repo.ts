@@ -31,6 +31,8 @@ export interface ContextBreakdown {
     seq: number;
     assistantStepId: string;
     inputTokens: number;
+    cacheReadTokens: number;
+    promptTokens: number;
     outputTokens: number;
     deltaFromPrev: number | null;
     contributors: {
@@ -312,19 +314,48 @@ function getTurnReplyTextChars(t: Turn): number {
   return t.anchor.reply_text_len || 0;
 }
 
+// ─── Shared data fetch (single SQL + groupTurns) ───────────────
+
+function fetchAndGroup(sessionKey: string, runId?: string): { rows: RawStep[]; turns: Turn[]; resolvedRunId: string } | null {
+  const rows = getTraceSpans(sessionKey, runId) as unknown as RawStep[];
+  if (rows.length === 0) return null;
+  const turns = groupTurns(rows);
+  if (turns.length === 0) return null;
+  return { rows, turns, resolvedRunId: rows[0].run_id };
+}
+
+/**
+ * Combined fetch — one SQL query, one groupTurns pass, both results.
+ * Used by the /context route to avoid double-fetching.
+ */
+export function getContextBoth(
+  sessionKey: string,
+  runId?: string,
+): { breakdown: ContextBreakdown; timeline: ContextTimeline } | null {
+  const data = fetchAndGroup(sessionKey, runId);
+  if (!data) return null;
+  const breakdown = buildBreakdown(sessionKey, data.rows, data.turns, data.resolvedRunId);
+  const timeline = buildTimeline(sessionKey, data.rows, data.turns, data.resolvedRunId);
+  return { breakdown, timeline };
+}
+
 // ─── Coarse breakdown (5 buckets) ───────────────────────────────
 
 export function getContextBreakdown(
   sessionKey: string,
   runId?: string,
 ): ContextBreakdown | null {
-  const rows = getTraceSpans(sessionKey, runId) as unknown as RawStep[];
-  if (rows.length === 0) return null;
+  const data = fetchAndGroup(sessionKey, runId);
+  if (!data) return null;
+  return buildBreakdown(sessionKey, data.rows, data.turns, data.resolvedRunId);
+}
 
-  const turns = groupTurns(rows);
-  if (turns.length === 0) return null;
-
-  const resolvedRunId = rows[0].run_id;
+function buildBreakdown(
+  sessionKey: string,
+  rows: RawStep[],
+  turns: Turn[],
+  resolvedRunId: string,
+): ContextBreakdown {
 
   const baseline = getTurnPromptTokens(turns[0]);
   const totalLatest = getTurnPromptTokens(turns[turns.length - 1]);
@@ -347,6 +378,8 @@ export function getContextBreakdown(
         seq: t.anchor.seq,
         assistantStepId: t.anchor.step_id,
         inputTokens,
+        cacheReadTokens: getTurnCacheReadTokens(t),
+        promptTokens,
         outputTokens,
         deltaFromPrev: null,
         contributors: null,
@@ -372,6 +405,8 @@ export function getContextBreakdown(
       seq: t.anchor.seq,
       assistantStepId: t.anchor.step_id,
       inputTokens,
+      cacheReadTokens: getTurnCacheReadTokens(t),
+      promptTokens,
       outputTokens,
       deltaFromPrev,
       contributors: {
@@ -412,14 +447,17 @@ export function getContextTimeline(
   sessionKey: string,
   runId?: string,
 ): ContextTimeline | null {
-  const rows = getTraceSpans(sessionKey, runId) as unknown as RawStep[];
-  if (rows.length === 0) return null;
+  const data = fetchAndGroup(sessionKey, runId);
+  if (!data) return null;
+  return buildTimeline(sessionKey, data.rows, data.turns, data.resolvedRunId);
+}
 
-  const turns = groupTurns(rows);
-  if (turns.length === 0) return null;
-
-  const resolvedRunId = rows[0].run_id;
-
+function buildTimeline(
+  sessionKey: string,
+  rows: RawStep[],
+  turns: Turn[],
+  resolvedRunId: string,
+): ContextTimeline {
   // ─── Per-turn rows ────────────────────────────────────────────
   const turnRows: ContextTimeline["turns"] = [];
   for (let i = 0; i < turns.length; i++) {
@@ -450,27 +488,28 @@ export function getContextTimeline(
   }
 
   // ─── Cumulative aggregates ────────────────────────────────────
-  const allAssistantRows = rows.filter((r) => r.role === "assistant");
   const allToolResultRows = rows.filter((r) => r.role === "toolResult");
 
-  const totalOutputTokens = allAssistantRows.reduce(
-    (n, r) => n + (r.output_tokens || 0),
+  const totalOutputTokens = turnRows.reduce(
+    (n, t) => n + t.outputTokens,
     0,
   );
-  const totalThinkingChars = allAssistantRows.reduce(
-    (n, r) => n + (r.thinking_text_len || 0),
+  const totalThinkingChars = turnRows.reduce(
+    (n, t) => n + t.thinkingChars,
     0,
   );
   const totalToolResultChars = allToolResultRows.reduce(
     (n, r) => n + (r.result_text_len || 0),
     0,
   );
-  const totalToolCallArgsChars = allAssistantRows
-    .filter((r) => r.tool_name)
-    .reduce((n, r) => n + (r.input_text_len || 0), 0);
-  const totalReplyTextChars = allAssistantRows
-    .filter((r) => r.node_type === "REPLY")
-    .reduce((n, r) => n + (r.reply_text_len || 0), 0);
+  const totalToolCallArgsChars = turnRows.reduce(
+    (n, t) => n + t.toolCallArgsChars,
+    0,
+  );
+  const totalReplyTextChars = turnRows.reduce(
+    (n, t) => n + t.replyTextChars,
+    0,
+  );
 
   const peakInputTokens = turnRows.reduce(
     (m, t) => Math.max(m, t.inputTokens + t.cacheReadTokens),
@@ -570,7 +609,7 @@ function detectPhases(turnRows: ContextTimeline["turns"]): ContextTimeline["phas
   if (turnRows.length === 0) return [];
 
   const phases: ContextTimeline["phases"] = [];
-  const peakInput = turnRows.reduce((m, t) => Math.max(m, t.inputTokens), 0);
+  const peakInput = turnRows.reduce((m, t) => Math.max(m, t.inputTokens + t.cacheReadTokens), 0);
 
   // Step 1 — assign each turn a label
   const labels: ContextPhaseName[] = turnRows.map((t, i) => {
@@ -605,7 +644,7 @@ function detectPhases(turnRows: ContextTimeline["turns"]): ContextTimeline["phas
       const cacheHit = inDenom > 0 ? cR / inDenom : 0;
       const isWrite = t.primaryTool === "write" || t.primaryTool === "edit";
       const total = t.totalTokens || 1;
-      const drift = end > 0 ? Math.abs(t.totalTokens - turnRows[end - 1].totalTokens) / total : 0;
+      const drift = end > start ? Math.abs(t.totalTokens - turnRows[end - 1].totalTokens) / total : 0;
       if (cacheHit >= LOOP_CACHE_HIT_THRESHOLD && !isWrite && drift <= LOOP_TOTAL_DRIFT_THRESHOLD) {
         end++;
       } else {
@@ -624,13 +663,15 @@ function detectPhases(turnRows: ContextTimeline["turns"]): ContextTimeline["phas
     const lab = labels[i];
     let j = i;
     while (j + 1 < turnRows.length && labels[j + 1] === lab) j++;
+    const startPrompt = turnRows[i].inputTokens + turnRows[i].cacheReadTokens;
+    const endPrompt = turnRows[j].inputTokens + turnRows[j].cacheReadTokens;
     phases.push({
       name: lab,
       startSeq: turnRows[i].seq,
       endSeq: turnRows[j].seq,
-      startTotal: turnRows[i].totalTokens,
-      endTotal: turnRows[j].totalTokens,
-      deltaTotal: turnRows[j].totalTokens - turnRows[i].totalTokens,
+      startTotal: startPrompt,
+      endTotal: endPrompt,
+      deltaTotal: endPrompt - startPrompt,
       note: buildPhaseNote(lab, turnRows.slice(i, j + 1)),
     });
     i = j + 1;
@@ -644,9 +685,10 @@ function buildPhaseNote(name: ContextPhaseName, slice: ContextTimeline["turns"])
     case "bootstrap":
       return `${slice.length} bootstrap turn${slice.length === 1 ? "" : "s"}`;
     case "spike": {
-      const d = slice[0].deltaIn ?? 0;
-      const tool = slice[0].primaryTool || "unknown";
-      return `+${d.toLocaleString()} via ${tool}`;
+      const biggest = slice.reduce((best, t) => ((t.deltaIn ?? 0) > (best.deltaIn ?? 0) ? t : best), slice[0]);
+      const d = biggest.deltaIn ?? 0;
+      const tool = biggest.primaryTool || "unknown";
+      return `+${d.toLocaleString()} via ${tool}` + (slice.length > 1 ? ` (${slice.length} spikes)` : "");
     }
     case "loop":
       return `${slice.length} turns, cache-hit loop, no writes`;
@@ -673,7 +715,7 @@ function detectLoopFlags(
       const cacheHit = inDenom > 0 ? t.cacheReadTokens / inDenom : 0;
       const isWrite = t.primaryTool === "write" || t.primaryTool === "edit";
       const total = t.totalTokens || 1;
-      const drift = j > 0 ? Math.abs(t.totalTokens - turnRows[j - 1].totalTokens) / total : 0;
+      const drift = j > i ? Math.abs(t.totalTokens - turnRows[j - 1].totalTokens) / total : 0;
       if (
         cacheHit >= LOOP_CACHE_HIT_THRESHOLD &&
         !isWrite &&

@@ -284,22 +284,16 @@ if (timeline) {
   assert(tt[3].replyTextChars === 120, "turn 3 replyTextChars == 120");
   assert(tt[0].replyTextChars === 0, "turn 0 replyTextChars == 0 (no text content)");
 
-  // Cumulative aggregates — totalOutputTokens sums output_tokens across
-  // EVERY assistant row, which intentionally double-counts the per-tool
-  // approximation: each tool_call row's output_tokens equals the parent
-  // assistant's output_tokens (when N=1). For our 4-turn fixture:
-  //   a0  MODEL_THINK     : 200
-  //   a0  read tool_call  : 200  (parent.output / 1)
-  //   a1  MODEL_THINK     : 180
-  //   a1  MCP  tool_call  : 180
-  //   a2  MODEL_THINK     :  80
-  //   a2  read tool_call  :  80
-  //   a3  MODEL_THINK     :  50
-  //   a3  REPLY child     :  50
-  //   ─────────────────────────
-  //   TOTAL                1020
-  assert(timeline.cumulative.totalOutputTokens === 1020,
-    "cumulative.totalOutputTokens == 1020 (parent + per-tool double, intentional)",
+  // Cumulative aggregates — totalOutputTokens sums from turn anchors only
+  // (MODEL_THINK or REPLY), NOT from tool_call children:
+  //   turn 0 (a0 anchor) : 200
+  //   turn 1 (a1 anchor) : 180
+  //   turn 2 (a2 anchor) :  80
+  //   turn 3 (a3 anchor) :  50
+  //   ───────────────────────
+  //   TOTAL                510
+  assert(timeline.cumulative.totalOutputTokens === 510,
+    "cumulative.totalOutputTokens == 510 (anchor-only, no double-count)",
     `got ${timeline.cumulative.totalOutputTokens}`);
 
   // peak input (in + cR): max of 10000, 21500, 23800, 24800 = 24800
