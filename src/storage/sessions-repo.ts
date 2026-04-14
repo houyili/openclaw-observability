@@ -69,8 +69,16 @@ export function recomputeAllSessionCounts(): void {
       MAX(CASE WHEN node_type IN ('MODEL_THINK','REPLY') THEN input_tokens ELSE 0 END) as context_tok
     FROM steps WHERE session_key = ? AND total_tokens IS NOT NULL
   `);
+  // Latest step timestamp — used to refresh updated_at for sessions that
+  // fell out of auth-poller's `--active N` window but are still ingesting
+  // transcript steps (otherwise they'd display with stale/ancient ages).
+  const latestStepStmt = db.prepare(`
+    SELECT MAX(ts_epoch_ms) as latest FROM steps WHERE session_key = ?
+  `);
   // Fan-out: update both exact-match (direct sessions) AND all :run:UUID variants.
   // Token fields are only backfilled when the auth-poller left them at 0 or NULL.
+  // updated_at is refreshed to MAX(current, latest_step_ts) so transcript activity
+  // keeps the session fresh even when auth-poller has stopped returning it.
   const updateStmt = db.prepare(`
     UPDATE sessions SET
       llm_call_count = ?, tool_call_count = ?, skill_call_count = ?, mcp_call_count = ?,
@@ -78,6 +86,7 @@ export function recomputeAllSessionCounts(): void {
       input_tokens   = CASE WHEN COALESCE(input_tokens, 0) = 0 THEN ? ELSE input_tokens END,
       output_tokens  = CASE WHEN COALESCE(output_tokens, 0) = 0 THEN ? ELSE output_tokens END,
       context_tokens = CASE WHEN COALESCE(context_tokens, 0) = 0 THEN ? ELSE context_tokens END,
+      updated_at     = MAX(COALESCE(updated_at, 0), ?),
       source = CASE WHEN ? > 0 THEN 'transcript+auth' ELSE source END
     WHERE session_key = ? OR session_key LIKE ?
   `);
@@ -86,9 +95,11 @@ export function recomputeAllSessionCounts(): void {
     const row = aggStmt.get(baseKey) as any;
     if (!row) continue;
     const tok = tokenStmt.get(baseKey) as any;
+    const latest = latestStepStmt.get(baseKey) as any;
     updateStmt.run(
       row.llm || 0, row.tool || 0, row.skill || 0, row.mcp || 0,
       tok?.total_tok || 0, tok?.input_tok || 0, tok?.output_tok || 0, tok?.context_tok || 0,
+      latest?.latest || 0,
       row.total || 0,
       baseKey, baseKey + ":run:%",
     );
@@ -132,6 +143,11 @@ export function recomputeSessionCounts(sessionKey: string): void {
     FROM steps WHERE session_key = ? AND total_tokens IS NOT NULL
   `).get(baseKey) as any;
 
+  // Latest step ts — refresh updated_at for sessions not covered by auth-poller
+  const latest = db.prepare(`
+    SELECT MAX(ts_epoch_ms) as latest FROM steps WHERE session_key = ?
+  `).get(baseKey) as any;
+
   db.prepare(`
     UPDATE sessions SET
       llm_call_count = ?, tool_call_count = ?, skill_call_count = ?, mcp_call_count = ?,
@@ -139,11 +155,13 @@ export function recomputeSessionCounts(sessionKey: string): void {
       input_tokens   = CASE WHEN COALESCE(input_tokens, 0) = 0 THEN ? ELSE input_tokens END,
       output_tokens  = CASE WHEN COALESCE(output_tokens, 0) = 0 THEN ? ELSE output_tokens END,
       context_tokens = CASE WHEN COALESCE(context_tokens, 0) = 0 THEN ? ELSE context_tokens END,
+      updated_at     = MAX(COALESCE(updated_at, 0), ?),
       source = CASE WHEN ? > 0 THEN 'transcript+auth' ELSE source END
     WHERE session_key = ? OR session_key LIKE ?
   `).run(
     row.llm || 0, row.tool || 0, row.skill || 0, row.mcp || 0,
     tok?.total_tok || 0, tok?.input_tok || 0, tok?.output_tok || 0, tok?.context_tok || 0,
+    latest?.latest || 0,
     row.total || 0,
     baseKey, baseKey + ":run:%",
   );

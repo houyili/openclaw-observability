@@ -62,7 +62,9 @@ export const handleSessionsRoutes = {
         currentOp: s.current_op,
         blocker: s.blocker,
         lastBlockDurationMs,
-        ageMs: s.age_ms,
+        // Compute age live from updated_at; stored s.age_ms is a stale
+        // snapshot from the last auth-poller tick (CLI at poll time).
+        ageMs: s.updated_at ? Date.now() - s.updated_at : s.age_ms,
         updatedAt: s.updated_at,
         parentSessionKey: s.parent_session_key || null,
         parentSessionId: s.parent_session_id || null,

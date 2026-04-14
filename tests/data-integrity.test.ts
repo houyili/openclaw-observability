@@ -379,6 +379,33 @@ console.log("\n=== E. Round 6: Context Length live invariants ===");
   }
 }
 
+// ─── F-pre. Round 7 (2026-04-14): updated_at freshness ─────────
+console.log("\n=== F-pre. updated_at vs latest step ts drift ===");
+{
+  // Bug caught 2026-04-14: sessions.updated_at is set ONLY by auth-poller
+  // from CLI output. If a session falls out of the CLI's --active window
+  // but transcript-watcher keeps ingesting steps, updated_at freezes while
+  // the step timestamps keep moving. Fix: recomputeSessionCounts pushes
+  // updated_at to MAX(current, latest step ts).
+  const drift = db.prepare(`
+    SELECT s.session_key, s.updated_at, MAX(st.ts_epoch_ms) as latest_step,
+           (MAX(st.ts_epoch_ms) - s.updated_at) as drift_ms
+    FROM sessions s
+    JOIN steps st ON st.session_key = s.session_key
+    WHERE s.updated_at IS NOT NULL
+    GROUP BY s.session_key
+    HAVING drift_ms > 300000  -- 5 min tolerance
+    LIMIT 10
+  `).all() as any[];
+  assert(
+    drift.length === 0,
+    "F-pre: no session has updated_at lagging latest step by >5min",
+    drift.length > 0
+      ? `${drift.length} stale sessions, worst: ${drift[0].session_key} (drift ${Math.round(drift[0].drift_ms / 60000)}m)`
+      : undefined,
+  );
+}
+
 // ─── F. Round 7: Parent-child relationship integrity ───────────
 console.log("\n=== F. Round 7: Parent-child session integrity ===");
 {
