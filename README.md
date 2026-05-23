@@ -163,7 +163,10 @@ More detail:
 - [`docs/install/linux.md`](docs/install/linux.md)
 - [`docs/install/cloudflare.md`](docs/install/cloudflare.md)
 - [`docs/compatibility.md`](docs/compatibility.md)
+- [`docs/api-stability.md`](docs/api-stability.md)
 - [`docs/release-checklist.md`](docs/release-checklist.md)
+- [`CONTRIBUTING.md`](CONTRIBUTING.md)
+- [`SECURITY.md`](SECURITY.md)
 - [`CHANGELOG.md`](CHANGELOG.md)
 
 ## License
