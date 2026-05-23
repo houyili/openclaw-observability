@@ -66,7 +66,7 @@ console.log("\n=== Group 1: Schema migration ===");
 // Turn 1: a1 — usage.input=11500  output=180  cacheRead=10000 thinking=13
 //   prompt₁ = in + cR = 11500 + 10000 = 21500
 //   prevToolResults: 1 result of 1200 chars (300 tokens) from a0's read
-//   tool call. a1's tool call is feishu_search_doc_wiki (MCP_CALL),
+//   tool call. a1's tool call is lark_search_doc_wiki (MCP_CALL),
 //   so the parser sets a1's tool_call row's context_token_delta =
 //   a1.input - a0.input = 1500. getTurnMcpDelta(turn 1) sums
 //   context_token_delta of MCP_CALL rows in a1's assistantRows = 1500.
@@ -108,11 +108,11 @@ const fixtureEntries: any[] = [
   // tool result from a0 — 1200 chars
   { type: "message", id: "r0", parentId: "a0", timestamp: "2026-04-11T00:00:02.000Z",
     message: { role: "toolResult", content: [{ type: "text", text: "x".repeat(1200) }] } },
-  // a1 — assistant with thinking + 1 MCP tool call (feishu_search_doc_wiki)
+  // a1 — assistant with thinking + 1 MCP tool call (lark_search_doc_wiki)
   { type: "message", id: "a1", parentId: "r0", timestamp: "2026-04-11T00:00:03.000Z",
     message: { role: "assistant", content: [
       { type: "thinking", text: "thinking-a1!!" },  // 13 chars
-      { type: "toolCall", name: "feishu_search_doc_wiki", id: "tc1", arguments: { q: "x" } },
+      { type: "toolCall", name: "lark_search_doc_wiki", id: "tc1", arguments: { q: "x" } },
     ], usage: { input: 11500, output: 180, cacheRead: 10000, totalTokens: 11680 } } },
   // tool result from a1's MCP call — 800 chars
   { type: "message", id: "r1", parentId: "a1", timestamp: "2026-04-11T00:00:04.000Z",
@@ -267,7 +267,7 @@ if (timeline) {
 
   // primaryTool detection
   assert(tt[0].primaryTool === "read", "turn 0 primaryTool == read");
-  assert(tt[1].primaryTool === "feishu_search_doc_wiki", "turn 1 primaryTool == feishu_search_doc_wiki");
+  assert(tt[1].primaryTool === "lark_search_doc_wiki", "turn 1 primaryTool == lark_search_doc_wiki");
   assert(tt[3].primaryTool === null, "turn 3 (REPLY) primaryTool == null");
 
   // prevToolResultChars on turn 1 (the result from a0's read = 1200 chars)

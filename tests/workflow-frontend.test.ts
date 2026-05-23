@@ -107,7 +107,7 @@ function sampleWorkflow() {
       { id: "parent", title: "Parent Session", kind: "parent" },
       { id: "runtime", title: "OpenClaw Runtime", kind: "runtime" },
       { id: "child:abc", title: "Child abc", kind: "child" },
-      { id: "taskflow", title: "Workflow State", kind: "taskflow" },
+      { id: "workflow_state", title: "Workflow State", kind: "workflow_state" },
     ],
     events: [
       { id: "e1", laneId: "user", type: "user_message", ts: "2026-05-23T07:31:00Z", tsEpochMs: 1, title: "user message", provenance: { run_id: "run-12345678" } },
@@ -115,13 +115,13 @@ function sampleWorkflow() {
       { id: "e2", laneId: "parent", type: "sessions_spawn_requested", ts: "2026-05-23T07:31:01Z", tsEpochMs: 2, title: "sessions_spawn", provenance: { step_id: "step-spawn", duration_ms: 1200, input_tokens: 10000, cache_read_tokens: 2000, output_tokens: 80 } },
       { id: "e3", laneId: "runtime", type: "sessions_spawn_accepted", ts: "2026-05-23T07:31:01Z", tsEpochMs: 3, title: "spawn accepted", subtitle: "source-refresh", provenance: { childSessionKey: "abc", child_run_id: "child-run" } },
       { id: "e4", laneId: "child:abc", type: "child_final", ts: "2026-05-23T07:35:00Z", tsEpochMs: 4, title: "child final", provenance: { step_id: "child-final", artifact_path: "/tmp/source.md" } },
-      { id: "e5", laneId: "taskflow", type: "taskflow_gap", ts: "2026-05-23T07:35:01Z", tsEpochMs: 5, title: "child binding gap", status: "warning", provenance: { flow_id: "flow-1" } },
+      { id: "e5", laneId: "workflow_state", type: "workflow_state_gap", ts: "2026-05-23T07:35:01Z", tsEpochMs: 5, title: "child binding gap", status: "warning", provenance: { flow_id: "flow-1" } },
     ],
     edges: [
       { id: "edge-1", from: "e2", to: "e3", type: "spawn", label: "accepted" },
-      { id: "edge-2", from: "e3", to: "e5", type: "taskflow", label: "gap" },
+      { id: "edge-2", from: "e3", to: "e5", type: "workflow_state", label: "gap" },
     ],
-    diagnostics: [{ id: "d1", severity: "warning", type: "taskflow_childruns_empty", message: "Accepted child is missing from managed workflow child references", eventId: "e5" }],
+    diagnostics: [{ id: "d1", severity: "warning", type: "workflow_state_child_refs_empty", message: "Accepted child is missing from managed workflow child references", eventId: "e5" }],
     attention: {
       status: "stuck",
       title: "Parent yielded; waiting for child merge",
@@ -140,6 +140,61 @@ function sampleWorkflow() {
         { id: "edges.resolve", status: "ok", message: "all edges resolve" },
       ],
     },
+    runs: [{ runId: "run-12345678", startedAt: "2026-05-23T07:31:00Z", durationMs: 1000, modelSteps: 1, toolSteps: 2, status: "completed" }],
+  };
+}
+
+function samplePromptCheck() {
+  return {
+    sessionKey: "parent",
+    sessionId: "sid-parent",
+    runId: "run-12345678",
+    status: "warning",
+    promptSources: [
+      { id: "rules", kind: "rule", path: "config/prompt-rules.json", exists: true, hash: "abc", mtime: 1, title: "prompt-rules.json" },
+    ],
+    rules: [
+      {
+        ruleId: "checkpoint_before_sessions_yield",
+        title: "Checkpoint before sessions_yield",
+        severity: "warning",
+        status: "warning",
+        message: "sessions_yield happened without a visible checkpoint.",
+        evidenceStepIds: ["step-yield"],
+        sourceFiles: ["docs/workflow-graph.md"],
+      },
+      {
+        ruleId: "spawn_accept_must_have_child_key_run_id",
+        title: "Spawn result exposes child identifiers",
+        severity: "warning",
+        status: "ok",
+        message: "All spawn results expose childSessionKey and runId.",
+        evidenceStepIds: ["step-spawn"],
+        sourceFiles: ["docs/architecture.md"],
+      },
+    ],
+    hooks: [
+      {
+        eventId: "hook-1",
+        hookId: "workflow-checkpoint-before-yield",
+        event: "reminder_shown",
+        severity: "warning",
+        status: "bound",
+        message: "Write checkpoint before sessions_yield",
+        ts: "2026-05-23T07:31:02Z",
+        runId: "run-12345678",
+        relatedStepId: "step-yield",
+      },
+    ],
+    diagnostics: [
+      {
+        id: "diag-1",
+        severity: "warning",
+        type: "rule_checkpoint_before_sessions_yield",
+        message: "sessions_yield happened without a visible checkpoint.",
+        provenance: { rule_id: "checkpoint_before_sessions_yield", step_id: "step-yield", source_file: "docs/workflow-graph.md" },
+      },
+    ],
     runs: [{ runId: "run-12345678", startedAt: "2026-05-23T07:31:00Z", durationMs: 1000, modelSteps: 1, toolSteps: 2, status: "completed" }],
   };
 }
@@ -183,7 +238,7 @@ console.log("\n=== Group 1: renderWorkflowGraph ===");
   assert(html.includes("workflow-attention wf-stuck"), "renders workflow attention summary");
   assert(html.includes("Parent yielded; waiting for child merge"), "renders stuck location title");
   assert(html.includes("wf-attention-hit"), "highlights the attention event");
-  assert(html.includes("taskflow_childruns_empty"), "renders diagnostics");
+  assert(html.includes("workflow_state_child_refs_empty"), "renders diagnostics");
   assert(html.includes("childSessionKey"), "detail provenance includes childSessionKey");
   assert(!/mermaid/i.test(html), "does not require Mermaid markup");
 }
@@ -191,26 +246,44 @@ console.log("\n=== Group 1: renderWorkflowGraph ===");
 console.log("\n=== Group 2: refreshDetail order and preservation ===");
 {
   const loaded = loadAppJs();
+  loaded.setFetchResponse("/prompt-check", samplePromptCheck());
   loaded.setFetchResponse("/workflow", sampleWorkflow());
   loaded.setFetchResponse("/trace", sampleTrace());
   loaded.setFetchResponse("/context", sampleContext());
   await loaded.ctx.refreshDetail("parent");
   const html = loaded.detailHtml();
+  const promptIdx = html.indexOf("Prompt Check");
   const workflowIdx = html.indexOf("Workflow Graph");
   const traceIdx = html.indexOf("Workflow trace");
   const contextIdx = html.indexOf("Context length");
+  assert(promptIdx >= 0, "Prompt Check section rendered");
   assert(workflowIdx >= 0, "Workflow Graph section rendered");
   assert(traceIdx >= 0, "Workflow trace section preserved");
   assert(contextIdx >= 0, "Context length section preserved");
-  assert(workflowIdx < traceIdx && traceIdx < contextIdx, "section order is graph, trace, context");
+  assert(promptIdx < workflowIdx && workflowIdx < traceIdx && traceIdx < contextIdx, "section order is prompt, graph, trace, context");
+  assert(html.includes("detail-section-prompt"), "prompt section wrapper present");
   assert(html.includes("detail-section-workflow"), "workflow section wrapper present");
   assert(html.includes("detail-section-trace"), "trace wrapper preserved");
   assert(html.includes("detail-section-context"), "context wrapper preserved");
 }
 
-console.log("\n=== Group 3: static dependency check ===");
+console.log("\n=== Group 3: renderPromptCheck ===");
+{
+  const { ctx } = loadAppJs();
+  assert(typeof ctx.renderPromptCheck === "function", "renderPromptCheck exposed on vm global");
+  const html = ctx.renderPromptCheck(samplePromptCheck());
+  assert(html.includes("Rules: 2"), "renders prompt rule count");
+  assert(html.includes("Hooks: 1"), "renders hook count");
+  assert(html.includes("Warnings: 2"), "renders warning count");
+  assert(html.includes("checkpoint_before_sessions_yield"), "renders rule provenance");
+  assert(html.includes("workflow-checkpoint-before-yield"), "renders hook reminder event");
+  assert(html.includes("step-yield"), "renders step provenance");
+}
+
+console.log("\n=== Group 4: static dependency check ===");
 {
   const source = readFileSync(join(REPO_ROOT, "src/frontend/app.js"), "utf-8");
+  assert(source.includes("/prompt-check?"), "refreshDetail fetches prompt-check endpoint");
   assert(source.includes("/workflow?"), "refreshDetail fetches workflow endpoint");
   assert(!/mermaid/i.test(source), "app.js has no Mermaid dependency");
 }

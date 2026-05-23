@@ -157,18 +157,18 @@ function buildRuntimeMode(s: any): string {
 
 /**
  * Extract the "who/which group" identity from session_key.
- * e.g. "agent:main:feishu:group:oc_6da4..." → "group:oc_6da4..."
- *      "agent:main:feishu:direct:ou_64bc..." → "user:ou_64bc..."
+ * e.g. "agent:main:chat:group:oc_6da4..." → "group:oc_6da4..."
+ *      "agent:main:chat:direct:user_64bc..." → "user:user_64bc..."
  *      "agent:main:cron:188f..." → "cron:188f..."
  */
 function parseDiag(key: string): string {
-  if (key.includes(":feishu:group:")) {
-    const m = key.match(/:feishu:group:(oc_[a-f0-9]+)/);
-    return m ? `group:${m[1].slice(0, 16)}` : "feishu-group";
+  if (key.includes(":group:")) {
+    const m = key.match(/:group:([^:]+)/);
+    return m ? `group:${m[1].slice(0, 16)}` : "group";
   }
-  if (key.includes(":feishu:direct:")) {
-    const m = key.match(/:feishu:direct:(ou_[a-f0-9]+)/);
-    return m ? `user:${m[1].slice(0, 16)}` : "feishu-direct";
+  if (key.includes(":direct:")) {
+    const m = key.match(/:direct:([^:]+)/);
+    return m ? `user:${m[1].slice(0, 16)}` : "direct";
   }
   if (key.includes(":cron:")) {
     const m = key.match(/:cron:([a-f0-9-]+)/);
@@ -184,8 +184,8 @@ function parseDiag(key: string): string {
 }
 
 function parseChannel(key: string): string {
-  if (key.includes(":feishu:group:")) return "feishu-group";
-  if (key.includes(":feishu:direct:")) return "feishu-direct";
+  const structured = key.match(/^agent:[^:]+:([^:]+):(group|direct):/);
+  if (structured) return `${structured[1]}-${structured[2]}`;
   if (key.includes(":cron:") || key.includes("hourly-cron")) return "cron";
   if (key.includes(":subagent:")) return "subagent";
   return "direct";

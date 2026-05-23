@@ -16,14 +16,14 @@ export type WorkflowEventType =
   | "child_artifact_written"
   | "child_final"
   | "parent_resumed"
-  | "taskflow_plan_snapshot"
-  | "taskflow_child_bound"
-  | "taskflow_gap";
+  | "workflow_state_snapshot"
+  | "workflow_state_child_bound"
+  | "workflow_state_gap";
 
 export interface WorkflowLane {
   id: string;
   title: string;
-  kind: "user" | "parent" | "runtime" | "child" | "taskflow";
+  kind: "user" | "parent" | "runtime" | "child" | "workflow_state";
 }
 
 export interface WorkflowEvent {
@@ -42,7 +42,7 @@ export interface WorkflowEdge {
   id: string;
   from: string;
   to: string;
-  type: "causal" | "spawn" | "resume" | "taskflow";
+  type: "causal" | "spawn" | "resume" | "workflow_state";
   label?: string;
 }
 
@@ -126,11 +126,6 @@ const WORKFLOW_STATE_ADAPTERS = [
     id: "openclaw-managed-workflow",
     start: "<!-- openclaw-workflow:start -->",
     end: "<!-- openclaw-workflow:end -->",
-  },
-  {
-    id: "legacy-taskflow",
-    start: `<!-- ${["researcher", "orchestrator"].join("-")}:start -->`,
-    end: `<!-- ${["researcher", "orchestrator"].join("-")}:end -->`,
   },
 ];
 
@@ -303,9 +298,9 @@ function eventOrderRank(type: WorkflowEventType): number {
     child_artifact_written: 6,
     child_final: 7,
     parent_resumed: 8,
-    taskflow_plan_snapshot: 9,
-    taskflow_child_bound: 10,
-    taskflow_gap: 11,
+    workflow_state_snapshot: 9,
+    workflow_state_child_bound: 10,
+    workflow_state_gap: 11,
   };
   return ranks[type] ?? 99;
 }
@@ -605,7 +600,7 @@ export function getWorkflowGraph(sessionKey: string, runId?: string, sessionId?:
   ];
 
   if (parentSteps.length === 0) {
-    const emptyLanes = [...lanes, { id: "taskflow", title: "Workflow State", kind: "taskflow" } as WorkflowLane];
+    const emptyLanes = [...lanes, { id: "workflow_state", title: "Workflow State", kind: "workflow_state" } as WorkflowLane];
     const validation = validateWorkflowGraph({
       sessionId,
       parentKey,
@@ -841,65 +836,65 @@ export function getWorkflowGraph(sessionKey: string, runId?: string, sessionId?:
     }
   }
 
-  lanes.push({ id: "taskflow", title: "Workflow State", kind: "taskflow" });
+  lanes.push({ id: "workflow_state", title: "Workflow State", kind: "workflow_state" });
   const allChildSteps = [...childStepMap.values()].flat();
-  const taskflow = workflowStateFromArtifacts(parentSteps, allChildSteps);
+  const workflowState = workflowStateFromArtifacts(parentSteps, allChildSteps);
   const taskTs = (parentSteps.find(s => /work_status\.md/.test(`${s.input_preview || ""} ${s.result_preview || ""}`)) || parentSteps[parentSteps.length - 1])?.ts_epoch_ms || firstTs;
-  if (taskflow) {
+  if (workflowState) {
     const snapshot = addEvent(events, {
-      laneId: "taskflow",
-      type: "taskflow_plan_snapshot",
+      laneId: "workflow_state",
+      type: "workflow_state_snapshot",
       ts: new Date(taskTs).toISOString(),
       tsEpochMs: taskTs,
       title: "workflow snapshot",
-      subtitle: taskflow.currentStep || taskflow.flowId || taskflow.adapterId,
+      subtitle: workflowState.currentStep || workflowState.flowId || workflowState.adapterId,
       provenance: {
-        adapter_id: taskflow.adapterId,
-        flow_id: taskflow.flowId,
-        work_key: taskflow.workKey,
-        artifact_path: taskflow.sourcePath,
+        adapter_id: workflowState.adapterId,
+        flow_id: workflowState.flowId,
+        work_key: workflowState.workKey,
+        artifact_path: workflowState.sourcePath,
       },
     });
     for (const spawn of spawnAccepts) {
-      if (childMatchesWorkflowState(spawn.acceptedData, taskflow)) {
+      if (childMatchesWorkflowState(spawn.acceptedData, workflowState)) {
         const bound = addEvent(events, {
-          laneId: "taskflow",
-          type: "taskflow_child_bound",
+          laneId: "workflow_state",
+          type: "workflow_state_child_bound",
           ts: spawn.step.ts,
           tsEpochMs: spawn.step.ts_epoch_ms + 2,
           title: "child bound",
           subtitle: spawn.acceptedData.taskName || shortKey(spawn.acceptedData.childSessionKey),
           provenance: {
-            adapter_id: taskflow.adapterId,
-            flow_id: taskflow.flowId,
+            adapter_id: workflowState.adapterId,
+            flow_id: workflowState.flowId,
             childSessionKey: spawn.acceptedData.childSessionKey,
             child_run_id: spawn.acceptedData.runId,
-            artifact_path: taskflow.sourcePath,
+            artifact_path: workflowState.sourcePath,
           },
         });
-        addEdge(edges, spawn.accepted, bound, "taskflow", "bound");
+        addEdge(edges, spawn.accepted, bound, "workflow_state", "bound");
       } else {
         const gap = addEvent(events, {
-          laneId: "taskflow",
-          type: "taskflow_gap",
+          laneId: "workflow_state",
+          type: "workflow_state_gap",
           ts: spawn.step.ts,
           tsEpochMs: spawn.step.ts_epoch_ms + 2,
           title: "child binding gap",
           subtitle: "accepted child not present in workflow state",
           status: "warning",
           provenance: {
-            adapter_id: taskflow.adapterId,
-            flow_id: taskflow.flowId,
+            adapter_id: workflowState.adapterId,
+            flow_id: workflowState.flowId,
             childSessionKey: spawn.acceptedData.childSessionKey,
             child_run_id: spawn.acceptedData.runId,
-            artifact_path: taskflow.sourcePath,
+            artifact_path: workflowState.sourcePath,
           },
         });
-        addEdge(edges, spawn.accepted, gap, "taskflow", "gap");
+        addEdge(edges, spawn.accepted, gap, "workflow_state", "gap");
         diagnostics.push({
           id: `diag-${diagnostics.length + 1}`,
           severity: "warning",
-          type: "taskflow_childruns_empty",
+          type: "workflow_state_child_refs_empty",
           message: "Accepted child is missing from managed workflow child references",
           eventId: gap.id,
         });
@@ -907,8 +902,8 @@ export function getWorkflowGraph(sessionKey: string, runId?: string, sessionId?:
     }
   } else {
     const gap = addEvent(events, {
-      laneId: "taskflow",
-      type: "taskflow_gap",
+      laneId: "workflow_state",
+      type: "workflow_state_gap",
       ts: new Date(taskTs).toISOString(),
       tsEpochMs: taskTs,
       title: "Workflow state unavailable",

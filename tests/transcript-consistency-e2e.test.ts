@@ -4,7 +4,7 @@
  *
  * This suite is intentionally fixture-driven and local-only. It proves that
  * observable rows and projections can be traced back to canonical transcript
- * entries without relying on the user's production obs.db or live sessions.
+ * entries without relying on the user's live obs.db or live sessions.
  */
 
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -29,12 +29,13 @@ function eq(actual: unknown, expected: unknown, name: string) {
 
 const tmpHome = mkdtempSync(join(tmpdir(), "obs-transcript-e2e-"));
 mkdirSync(join(tmpHome, "logs/observability-v2"), { recursive: true });
-mkdirSync(join(tmpHome, "agents/researcher/sessions"), { recursive: true });
+mkdirSync(join(tmpHome, "logs/hooks"), { recursive: true });
+mkdirSync(join(tmpHome, "agents/demo/sessions"), { recursive: true });
 process.env.OPENCLAW_HOME = tmpHome;
 
-const parentKey = "agent:researcher:feishu:direct:local-parent";
-const childKey = "agent:researcher:subagent:local-child";
-const unrelatedChildKey = "agent:researcher:subagent:sidecar-should-not-appear";
+const parentKey = "agent:demo:chat:direct:local-parent";
+const childKey = "agent:demo:subagent:local-child";
+const unrelatedChildKey = "agent:demo:subagent:sidecar-should-not-appear";
 const parentSid = "11111111-1111-4111-8111-111111111111";
 const childSid = "22222222-2222-4222-8222-222222222222";
 const parentRun1 = "u-parent-1";
@@ -43,6 +44,7 @@ const childRun = "u-child-source";
 const workStatusPath = join(tmpHome, "workspace/paper/work_status.md");
 const checkpointPath = join(tmpHome, "workspace/paper/source_collection_checkpoint.md");
 const childArtifactPath = join(tmpHome, "workspace/paper/source_refresh_2026-05-23.md");
+const hookRemindersPath = join(tmpHome, "logs/hooks/reminders.jsonl");
 mkdirSync(join(tmpHome, "workspace/paper"), { recursive: true });
 writeFileSync(workStatusPath, "plain work status without a managed workflow projection\n");
 writeFileSync(checkpointPath, "checkpoint\n");
@@ -131,23 +133,48 @@ function writeJsonl(path: string, entries: Entry[]) {
   writeFileSync(path, entries.map(e => JSON.stringify(e)).join("\n") + "\n");
 }
 
-writeFileSync(join(tmpHome, "agents/researcher/sessions/sessions.json"), JSON.stringify({
+writeFileSync(join(tmpHome, "agents/demo/sessions/sessions.json"), JSON.stringify({
   [parentKey]: { sessionId: parentSid, label: "local parent" },
   [childKey]: { sessionId: childSid, label: "local child", spawnedBy: parentKey },
 }));
-writeJsonl(join(tmpHome, "agents/researcher/sessions", `${parentSid}.jsonl`), parentEntries);
-writeJsonl(join(tmpHome, "agents/researcher/sessions", `${childSid}.jsonl`), childEntries);
-writeJsonl(join(tmpHome, "agents/researcher/sessions", `${parentSid}.acp-stream.jsonl`), [
+writeJsonl(join(tmpHome, "agents/demo/sessions", `${parentSid}.jsonl`), parentEntries);
+writeJsonl(join(tmpHome, "agents/demo/sessions", `${childSid}.jsonl`), childEntries);
+writeJsonl(join(tmpHome, "agents/demo/sessions", `${parentSid}.acp-stream.jsonl`), [
   { type: "message", id: "sidecar-user", parentId: "", timestamp: "2026-05-23T10:09:00.000Z",
     message: { role: "user", content: [{ type: "text", text: "sidecar" }] } },
   { type: "message", id: "sidecar-assistant", parentId: "sidecar-user", timestamp: "2026-05-23T10:09:01.000Z",
     message: { role: "assistant", content: [{ type: "text", text: "must not ingest" }],
       usage: { input: 1, output: 1, totalTokens: 2 } } },
 ]);
-writeJsonl(join(tmpHome, "agents/researcher/sessions", `${parentSid}.checkpoint.1.jsonl`), []);
-writeJsonl(join(tmpHome, "agents/researcher/sessions", `${parentSid}.trajectory.jsonl`), []);
+writeJsonl(join(tmpHome, "agents/demo/sessions", `${parentSid}.checkpoint.1.jsonl`), []);
+writeJsonl(join(tmpHome, "agents/demo/sessions", `${parentSid}.trajectory.jsonl`), []);
+writeFileSync(hookRemindersPath, [
+  JSON.stringify({
+    ts: "2026-05-23T10:01:19.900Z",
+    sessionKey: parentKey,
+    sessionId: parentSid,
+    runId: parentRun2,
+    relatedStepId: "a-parent-5:tc-yield",
+    hookId: "research-checkpoint-before-yield",
+    event: "reminder_shown",
+    severity: "warning",
+    message: "Write checkpoint before sessions_yield",
+  }),
+  JSON.stringify({
+    ts: "2026-05-23T10:01:19.950Z",
+    sessionKey: parentKey,
+    sessionId: parentSid,
+    runId: "unrelated-run",
+    relatedStepId: "unrelated-step",
+    hookId: "research-checkpoint-before-yield",
+    event: "reminder_shown",
+    severity: "warning",
+    message: "This hook belongs to a different run",
+  }),
+].join("\n") + "\n");
 
 const { startTranscriptWatcher, _resetSessionIdMapForTest } = await import("../src/ingest/transcript-watcher.ts");
+const { ingestHookReminderFile } = await import("../src/ingest/hook-reminder-reader.ts");
 const { readSessionStoreExtras } = await import("../src/ingest/auth-poller.ts");
 const { upsertAuthSessions } = await import("../src/storage/sessions-repo.ts");
 const {
@@ -159,6 +186,7 @@ const {
 const { upsertSteps, getTraceSpans, getRunList, getLatestRun } = await import("../src/storage/steps-repo.ts");
 const { getContextBoth } = await import("../src/storage/context-repo.ts");
 const { getWorkflowGraph } = await import("../src/storage/workflow-repo.ts");
+const { getPromptCheck } = await import("../src/storage/prompt-check-repo.ts");
 const { getDb, closeDb } = await import("../src/storage/db.ts");
 const { handleSessionsRoutes } = await import("../src/api/routes-sessions.ts");
 
@@ -320,16 +348,50 @@ function callTraceRoute(key: string, query: Record<string, string>) {
   return { payload, status };
 }
 
+function callContextRoute(key: string, query: Record<string, string>) {
+  let payload: any = null;
+  let status = 200;
+  handleSessionsRoutes.context(key, query, {} as any, (res, data, code = 200) => {
+    void res;
+    payload = data;
+    status = code;
+  });
+  return { payload, status };
+}
+
+function callWorkflowRoute(key: string, query: Record<string, string>) {
+  let payload: any = null;
+  let status = 200;
+  handleSessionsRoutes.workflow(key, query, {} as any, (res, data, code = 200) => {
+    void res;
+    payload = data;
+    status = code;
+  });
+  return { payload, status };
+}
+
+function callPromptCheckRoute(key: string, query: Record<string, string>) {
+  let payload: any = null;
+  let status = 200;
+  handleSessionsRoutes.promptCheck(key, query, {} as any, (res, data, code = 200) => {
+    void res;
+    payload = data;
+    status = code;
+  });
+  return { payload, status };
+}
+
 console.log("\n=== Setup: auth/session store + watcher ingest ===");
 upsertAuthSessions([
-  { sessionKey: parentKey, sessionId: parentSid, agentId: "researcher", channel: "feishu-direct", diag: "direct:local-parent", kind: "direct", label: null, model: "gpt-test", modelProvider: "openai", inputTokens: 0, outputTokens: 0, totalTokens: 0, contextTokens: 0, runtimeMode: "default", updatedAt: 0, ageMs: 0 },
-  { sessionKey: childKey, sessionId: childSid, agentId: "researcher", channel: "subagent", diag: "subagent:local-child", kind: "subagent", label: null, model: "gpt-test", modelProvider: "openai", inputTokens: 9999, outputTokens: 888, totalTokens: 12345, contextTokens: 9999, runtimeMode: "default", updatedAt: 0, ageMs: 0 },
+  { sessionKey: parentKey, sessionId: parentSid, agentId: "demo", channel: "chat-direct", diag: "direct:local-parent", kind: "direct", label: null, model: "gpt-test", modelProvider: "openai", inputTokens: 0, outputTokens: 0, totalTokens: 0, contextTokens: 0, runtimeMode: "default", updatedAt: 0, ageMs: 0 },
+  { sessionKey: childKey, sessionId: childSid, agentId: "demo", channel: "subagent", diag: "subagent:local-child", kind: "subagent", label: null, model: "gpt-test", modelProvider: "openai", inputTokens: 9999, outputTokens: 888, totalTokens: 12345, contextTokens: 9999, runtimeMode: "default", updatedAt: 0, ageMs: 0 },
 ]);
 for (const [key, extra] of readSessionStoreExtras()) {
   if (extra.label) updateSessionLabel(key, extra.label);
   if (extra.parentSessionKey) updateSessionParent(key, extra.parentSessionKey, extra.parentSessionId);
 }
 runWatcherOnce();
+ingestHookReminderFile(hookRemindersPath);
 recomputeAllSessionOps();
 
 const db = getDb();
@@ -411,6 +473,10 @@ console.log("\n=== Group 4: context projection matches transcript usage ===");
     eq(ctx.timeline.turns[1].deltaIn, 1300, "turn 2 deltaIn derived from transcript usage");
     eq(ctx.breakdown.totalLatest, 10400, "breakdown latest prompt tokens matches transcript");
   }
+  const ctxApi = callContextRoute(parentKey, { runId: parentRun2, sessionId: parentSid });
+  eq(ctxApi.status, 200, "context API route returns 200");
+  eq(ctxApi.payload.timeline.cumulative.peakInputTokens, 10400, "context API peak input matches transcript");
+  eq(ctxApi.payload.timeline.turns[1].deltaIn, 1300, "context API deltaIn matches transcript");
 }
 
 console.log("\n=== Group 5: workflow graph projection + stuck attention ===");
@@ -423,8 +489,8 @@ console.log("\n=== Group 5: workflow graph projection + stuck attention ===");
   assert(types.includes("child_started"), "workflow includes exact child start");
   assert(types.includes("child_artifact_written"), "workflow includes child artifact write");
   assert(types.includes("child_final"), "workflow includes child final");
-  assert(types.includes("taskflow_gap"), "workflow renders TaskFlow/workflow-state gap instead of guessing");
-  assert(!types.includes("taskflow_child_bound"), "workflow does not fabricate TaskFlow child binding");
+  assert(types.includes("workflow_state_gap"), "workflow renders Workflow State/workflow-state gap instead of guessing");
+  assert(!types.includes("workflow_state_child_bound"), "workflow does not fabricate Workflow State child binding");
   assert(graph.lanes.some(l => l.id === `child:${childKey}`), "child lane comes from exact accepted childSessionKey");
   assert(!graph.lanes.some(l => l.id === `child:${unrelatedChildKey}`), "unrelated/sidecar child does not appear");
   assert(graph.diagnostics.some(d => d.type === "workflow_state_unavailable"), "workflow gap diagnostic is emitted");
@@ -432,17 +498,45 @@ console.log("\n=== Group 5: workflow graph projection + stuck attention ===");
   eq(graph.attention.status, "stuck", "workflow attention marks yielded parent as stuck");
   assert(graph.attention.title.includes("Parent yielded"), "workflow attention points to yield/child merge");
   eq(graph.attention.childSessionKey, childKey, "workflow attention names exact child session key");
+
+  const workflowApi = callWorkflowRoute(parentKey, { runId: parentRun2, sessionId: parentSid });
+  eq(workflowApi.status, 200, "workflow API route returns 200");
+  assert(workflowApi.payload.events.some((e: any) => e.type === "sessions_spawn_accepted"), "workflow API includes accepted child event");
+  eq(workflowApi.payload.attention.childSessionKey, childKey, "workflow API attention preserves child session key");
 }
 
-console.log("\n=== Group 6: idempotent local E2E replay ===");
+console.log("\n=== Group 6: prompt check + hook reminder consistency ===");
+{
+  const prompt = getPromptCheck(parentKey, parentRun2, parentSid);
+  const checkpointRule = prompt.rules.find(r => r.ruleId === "checkpoint_before_sessions_yield");
+  assert(checkpointRule != null, "prompt check evaluates checkpoint-before-yield rule");
+  eq(checkpointRule?.status, "ok", "checkpoint-before-yield matches transcript evidence");
+  assert((checkpointRule?.evidenceStepIds || []).includes("a-parent-5:tc-yield"), "checkpoint rule provenance includes yield step");
+  eq(prompt.hooks.length, 1, "prompt check only attaches hook events from the selected run");
+  eq(prompt.hooks[0]?.hookId, "research-checkpoint-before-yield", "bound hook reminder is visible");
+  eq(prompt.hooks[0]?.status, "bound", "hook reminder has session/run/step binding");
+  eq(prompt.hooks[0]?.relatedStepId, "a-parent-5:tc-yield", "hook reminder keeps related step provenance");
+  assert(!prompt.hooks.some(h => h.runId === "unrelated-run"), "hook reminder from another run is not attached");
+
+  const promptApi = callPromptCheckRoute(parentKey, { runId: parentRun2, sessionId: parentSid });
+  eq(promptApi.status, 200, "prompt-check API route returns 200");
+  eq(promptApi.payload.hooks.length, 1, "prompt-check API only exposes selected-run hook");
+  assert(promptApi.payload.rules.some((r: any) => r.ruleId === "checkpoint_before_sessions_yield" && r.status === "ok"), "prompt-check API rule result matches transcript");
+}
+
+console.log("\n=== Group 7: idempotent local E2E replay ===");
 {
   const beforeSteps = (db.prepare("SELECT COUNT(*) as n FROM steps").get() as any).n;
+  const beforeHooks = (db.prepare("SELECT COUNT(*) as n FROM hook_events").get() as any).n;
   const beforeEvents = getWorkflowGraph(parentKey, parentRun2, parentSid).events.length;
   runWatcherOnce();
+  ingestHookReminderFile(hookRemindersPath);
   recomputeAllSessionOps();
   const afterSteps = (db.prepare("SELECT COUNT(*) as n FROM steps").get() as any).n;
+  const afterHooks = (db.prepare("SELECT COUNT(*) as n FROM hook_events").get() as any).n;
   const afterEvents = getWorkflowGraph(parentKey, parentRun2, parentSid).events.length;
   eq(afterSteps, beforeSteps, "re-ingesting same local transcripts does not duplicate steps");
+  eq(afterHooks, beforeHooks, "re-ingesting same hook reminders does not duplicate hook events");
   eq(afterEvents, beforeEvents, "workflow projection remains stable after idempotent replay");
 }
 

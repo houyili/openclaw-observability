@@ -26,7 +26,7 @@ const { getDb, closeDb } = await import("../src/storage/db.ts");
 const { getRunList, getTraceSpans, getLatestRun } = await import("../src/storage/steps-repo.ts");
 
 const db = getDb();
-const key = "agent:researcher:feishu:direct:ou_same_key";
+const key = "agent:demo:chat:direct:local-same-key";
 const sidA = "sid-a-00000000";
 const sidB = "sid-b-00000000";
 const sidMissing = "sid-missing-0000";

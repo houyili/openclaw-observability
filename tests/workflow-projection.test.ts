@@ -27,9 +27,9 @@ const { getWorkflowGraph } = await import("../src/storage/workflow-repo.ts");
 
 const db = getDb();
 const now = Date.parse("2026-05-23T15:31:00.000Z");
-const parentKey = "agent:researcher:feishu:group:oc_workflow";
-const childKey = "agent:researcher:subagent:child_source_refresh";
-const unrelatedChildKey = "agent:researcher:subagent:old_unrelated_child";
+const parentKey = "agent:demo:chat:group:oc_workflow";
+const childKey = "agent:demo:subagent:child_source_refresh";
+const unrelatedChildKey = "agent:demo:subagent:old_unrelated_child";
 const parentRun = "run-parent-2410";
 const childRun = "run-child-source";
 const workStatusPath = join(tmpHome, "work_status.md");
@@ -48,7 +48,7 @@ function insertSession(key: string, sid: string, parent?: { key: string; sid: st
     (session_key, session_id, agent_id, channel, diag, label, kind, model,
      input_tokens, output_tokens, total_tokens, context_tokens, updated_at, age_ms,
      source, parent_session_key, parent_session_id)
-    VALUES (?, ?, 'researcher', 'feishu-group', 'test', NULL, 'direct', 'gpt-5',
+    VALUES (?, ?, 'demo', 'chat-group', 'test', NULL, 'direct', 'gpt-5',
      0, 0, 0, 0, ?, 0, 'auth-only', ?, ?)
   `).run(key, sid, now, parent?.key || null, parent?.sid || null);
 }
@@ -174,12 +174,12 @@ waiting_children: none
   assert(types.includes("child_artifact_written"), "child artifact node created");
   assert(types.includes("child_final"), "child_final node created");
   assert(types.includes("parent_resumed"), "parent_resumed node created");
-  assert(types.includes("taskflow_plan_snapshot"), "workflow snapshot node created");
-  assert(types.includes("taskflow_gap"), "empty child refs creates taskflow_gap");
+  assert(types.includes("workflow_state_snapshot"), "workflow snapshot node created");
+  assert(types.includes("workflow_state_gap"), "empty child refs creates workflow_state_gap");
   assert(graph.lanes.some(l => l.id === `child:${childKey}`), "child lane uses exact childSessionKey");
   assert(!graph.lanes.some(l => l.id === `child:${unrelatedChildKey}`), "unspawned historical child is not pulled into current graph");
   assert(graph.edges.some(e => e.type === "spawn"), "spawn edge emitted");
-  assert(graph.diagnostics.some(d => d.type === "taskflow_childruns_empty"), "workflow child reference diagnostic emitted");
+  assert(graph.diagnostics.some(d => d.type === "workflow_state_child_refs_empty"), "workflow child reference diagnostic emitted");
   assert(graph.validation.status === "ok", "workflow graph self-validation passes");
   assert(graph.validation.checks.some(c => c.id === "provenance.step_id" && c.status === "ok"), "self-validation checks step provenance");
   assert(graph.validation.checks.some(c => c.id === "scope.run_id" && c.status === "ok"), "self-validation checks run scope");
@@ -188,7 +188,7 @@ waiting_children: none
   const accepted = graph.events.find(e => e.type === "sessions_spawn_accepted");
   assert(accepted?.provenance.childSessionKey === childKey, "accepted event includes childSessionKey provenance");
   assert(accepted?.provenance.child_run_id === childRun, "accepted event includes child run provenance");
-  const snapshot = graph.events.find(e => e.type === "taskflow_plan_snapshot");
+  const snapshot = graph.events.find(e => e.type === "workflow_state_snapshot");
   assert(snapshot?.provenance.adapter_id === "openclaw-managed-workflow", "generic workflow adapter provenance emitted");
 }
 
@@ -206,25 +206,24 @@ waiting_children:
 {
   const graph = getWorkflowGraph(parentKey, parentRun);
   const types = graph.events.map(e => e.type);
-  assert(types.includes("taskflow_child_bound"), "workflow child bound node created");
-  assert(!graph.diagnostics.some(d => d.type === "taskflow_childruns_empty"), "no empty-child diagnostic when exact child bound");
-  const bound = graph.events.find(e => e.type === "taskflow_child_bound");
+  assert(types.includes("workflow_state_child_bound"), "workflow child bound node created");
+  assert(!graph.diagnostics.some(d => d.type === "workflow_state_child_refs_empty"), "no empty-child diagnostic when exact child bound");
+  const bound = graph.events.find(e => e.type === "workflow_state_child_bound");
   assert(bound?.provenance.flow_id === "flow-bound", "bound event includes flow_id provenance");
 }
 
-console.log("\n=== Group 3: legacy adapter can be disabled ===");
-const legacyAdapterMarker = ["researcher", "orchestrator"].join("-");
-seed(`<!-- ${legacyAdapterMarker}:start -->
-flow_id: legacy-flow
+console.log("\n=== Group 3: workflow adapter can be disabled ===");
+seed(`<!-- openclaw-workflow:start -->
+flow_id: disabled-flow
 waiting_children:
 - childSessionKey: ${childKey}
-<!-- ${legacyAdapterMarker}:end -->
+<!-- openclaw-workflow:end -->
 `);
 {
   process.env.OBS_WORKFLOW_ADAPTERS = "none";
   const graph = getWorkflowGraph(parentKey, parentRun);
   delete process.env.OBS_WORKFLOW_ADAPTERS;
-  assert(!graph.events.some(e => e.type === "taskflow_plan_snapshot"), "disabled adapters skip managed workflow snapshot");
+  assert(!graph.events.some(e => e.type === "workflow_state_snapshot"), "disabled adapters skip managed workflow snapshot");
   assert(graph.diagnostics.some(d => d.type === "workflow_state_unavailable"), "disabled adapters emit generic workflow-state diagnostic");
 }
 

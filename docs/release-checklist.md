@@ -20,8 +20,8 @@ npm run test:perf
 
 ```bash
 rg -n "TO""DO|FIX""ME|TB""D" README.md DATA_ACCESS.md docs scripts src tests package.json
-rg -n "byte""dance|agents_design_doc|Documents/group|ngrok.*token|sk-|sec""ret|pass""word" .
-rg -n "openclaw\\.json|researcher|feishu|taskflow" .
+rg -n "byte""dance|agents_design""_doc|Documents/""group|ngrok.*token|sk-|sec""ret|pass""word" .
+rg -n "openclaw\\.json|research""er|fei""shu|task""flow|Task""Flow" .
 git log --all --format=fuller
 git status --short
 ```
@@ -39,8 +39,8 @@ Expected matches:
 - `openclaw.json` appears only in `docs/security.md` as a file that must not be
   committed.
 - `ngrok authtoken` appears only in tunnel setup docs/scripts.
-- `researcher`, `feishu`, and `taskflow` may appear only in compatibility code,
-  compatibility tests, or `docs/compatibility.md`.
+- Project-specific fleet names should not appear in tracked source. Legacy data
+  must be handled by generic session-key and MCP-prefix parsing.
 - `sk-` may appear as part of ordinary words such as `disk-scanned`; inspect
   each hit manually.
 
@@ -73,6 +73,6 @@ minimal message rewrite in the extracted clone before pushing.
 ## Tag
 
 ```bash
-git tag v0.1.0
+git tag vX.Y.Z
 git push origin main --tags
 ```

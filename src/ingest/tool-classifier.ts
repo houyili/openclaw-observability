@@ -63,7 +63,8 @@ function classifyExec(command: string): Classification {
 }
 
 function inferMcpServer(toolName: string): string {
-  if (toolName.startsWith("feishu_")) return "feishu";
+  const prefix = toolName.match(/^([a-z][a-z0-9-]*)_/i)?.[1];
+  if (prefix) return prefix;
   if (toolName.startsWith("api-")) return "notion";
   if (toolName === "gateway") return "gateway";
   return "unknown";

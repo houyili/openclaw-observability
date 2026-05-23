@@ -7,6 +7,10 @@
 #   transcript-consistency-e2e — local transcript JSONL → watcher → DB →
 #                     trace/context/workflow consistency
 #                     (transcript-consistency-e2e.test.ts) — hermetic
+#   prompt-check    — Prompt Check projection + hook reminder audit
+#                     (prompt-check.test.ts) — hermetic
+#   open-source-sanitization — checked-in test fixtures contain only synthetic
+#                     identifiers (open-source-sanitization.test.ts) — hermetic
 #   auth-stale      — /healthz + frontend pill under broken openclaw CLI
 #                     (auth-stale.test.ts)
 #   context-length  — Round 6 §1.2 #16 Context Length view (coarse + fine)
@@ -42,7 +46,7 @@
 #   perf            — wall-clock + CPU budgets for hot paths (perf-bench.ts)
 #
 # Hermetic suites (no live obs-v2 service or live transcripts needed):
-#   unit, invariants, fixture, transcript-consistency-e2e, auth-stale, context-length, cli-commands, frontend-detail, workflow-projection, workflow-frontend, session-id-scope, env-config, service-self-check, installer-scripts, watcher-rehome, token-backfill, parent-child
+#   unit, invariants, fixture, transcript-consistency-e2e, prompt-check, open-source-sanitization, auth-stale, context-length, cli-commands, frontend-detail, workflow-projection, workflow-frontend, session-id-scope, env-config, service-self-check, installer-scripts, watcher-rehome, token-backfill, parent-child
 #
 # Live suites (need a running obs-v2 + ~/.openclaw/agents/<agent>/sessions/):
 #   integrity, live-e2e, replay, cross-check, perf
@@ -60,7 +64,7 @@ NODE_BIN="${NODE_BIN:-$HOME/.local/bin/node}"
 [ -x "$NODE_BIN" ] || NODE_BIN="node"
 NODE_FLAGS="--experimental-sqlite --experimental-strip-types --no-warnings"
 
-FILTER="${TEST_FILTER:-unit invariants fixture transcript-consistency-e2e auth-stale context-length cli-commands frontend-detail workflow-projection workflow-frontend session-id-scope env-config service-self-check installer-scripts watcher-rehome token-backfill parent-child integrity live-e2e replay cross-check perf}"
+FILTER="${TEST_FILTER:-unit invariants fixture transcript-consistency-e2e prompt-check open-source-sanitization auth-stale context-length cli-commands frontend-detail workflow-projection workflow-frontend session-id-scope env-config service-self-check installer-scripts watcher-rehome token-backfill parent-child integrity live-e2e replay cross-check perf}"
 
 total_fail=0
 run_suite() {
@@ -85,6 +89,8 @@ run_suite "unit"            "tests/run-tests.ts"
 run_suite "invariants"      "tests/parser-invariants.test.ts"
 run_suite "fixture"         "tests/fixture-ingest.test.ts"
 run_suite "transcript-consistency-e2e" "tests/transcript-consistency-e2e.test.ts"
+run_suite "prompt-check"    "tests/prompt-check.test.ts"
+run_suite "open-source-sanitization" "tests/open-source-sanitization.test.ts"
 run_suite "auth-stale"      "tests/auth-stale.test.ts"
 run_suite "context-length"  "tests/context-length.test.ts"
 run_suite "cli-commands"    "tests/cli-commands.test.ts"

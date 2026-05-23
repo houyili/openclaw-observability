@@ -3,7 +3,7 @@
  *
  * Output rules (from the design doc §B.4):
  *   - Plain ASCII only — no Unicode box-drawing chars (Telegram strips them).
- *   - Bold via *asterisks* (Feishu / Telegram MarkdownV2 / WeChat all render).
+ *   - Bold via *asterisks* (common chat Markdown renderers support this).
  *   - No emojis (per global instructions).
  *   - Lines ≤ 80 chars.
  *   - Truncate session_keys to 28 chars with "…" ellipsis.

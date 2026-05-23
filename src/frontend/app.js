@@ -90,7 +90,7 @@ function parentDisplayName(s) {
     const l = s.parentLabel;
     return l.length > 20 ? l.slice(0, 18) + '..' : l;
   }
-  // Use diag (already short: "group:oc_1e24", "user:ou_64bc", "cron:188f")
+  // Use diag (already short: "group:chat-1", "user:local-1", "cron:188f")
   if (s.parentDiag) return s.parentDiag;
   // Fallback: parse the key
   if (!s.parentSessionKey) return '';
@@ -248,7 +248,7 @@ async function refreshSessions() {
       <td class="mono text-sm" title="${esc(s.sessionId || '')}">${esc((s.sessionId || '').slice(0, 8))}</td>
       <td class="text-sm">${esc(s.diag || '-')}</td>
       <td>${esc(s.label || '-')}</td>
-      <td>${badge(s.channel, s.channel?.includes('feishu') ? 'processing' : s.channel === 'cron' ? 'waiting' : 'default')}</td>
+      <td>${badge(s.channel, channelBadgeKind(s.channel))}</td>
       <td class="text-sm">${renderParentChild(s, showChildren)}</td>
       <td>${esc(s.kind)}</td>
       <td>${badge(s.source || 'auth-only', s.source === 'transcript+auth' ? 'active' : 'default')}</td>
@@ -282,6 +282,13 @@ async function refreshSessions() {
   if (expandedSessionKey) refreshDetail(expandedSessionKey, expandedSessionId);
 }
 
+function channelBadgeKind(channel) {
+  if (!channel) return 'default';
+  if (channel === 'cron') return 'waiting';
+  if (channel.endsWith('-group') || channel.endsWith('-direct')) return 'processing';
+  return 'default';
+}
+
 window.toggleSession = async function(key, sessionId) {
   const detail = document.getElementById('session-detail');
   sessionId = sessionId || null;
@@ -311,19 +318,22 @@ window.toggleRunSelector = function() {
   if (expandedSessionKey) refreshDetail(expandedSessionKey, expandedSessionId);
 };
 
-// Stacked detail: Workflow Graph + Workflow trace + Context length, refreshed together.
+// Stacked detail: Prompt Check + Workflow Graph + Workflow trace + Context length, refreshed together.
 async function refreshDetail(key, sessionId) {
   const detail = document.getElementById('session-detail');
   const params = new URLSearchParams();
   if (selectedRunId) params.set('runId', selectedRunId);
   if (sessionId) params.set('sessionId', sessionId);
   const query = params.toString();
-  const [workflowRes, traceRes, ctxRes] = await Promise.all([
+  const [promptRes, workflowRes, traceRes, ctxRes] = await Promise.all([
+    authFetch(`/api/sessions/${encodeURIComponent(key)}/prompt-check?${query}`).catch(() => null),
     authFetch(`/api/sessions/${encodeURIComponent(key)}/workflow?${query}`).catch(() => null),
     authFetch(`/api/sessions/${encodeURIComponent(key)}/trace?${query}`).catch(() => null),
     authFetch(`/api/sessions/${encodeURIComponent(key)}/context?${query}`).catch(() => null),
   ]);
 
+  let promptData = null;
+  if (promptRes && promptRes.ok) { try { promptData = await promptRes.json(); } catch { /* swallow */ } }
   let workflowData = null;
   if (workflowRes && workflowRes.ok) { try { workflowData = await workflowRes.json(); } catch { /* swallow */ } }
   let traceData = null;
@@ -332,10 +342,14 @@ async function refreshDetail(key, sessionId) {
   if (ctxRes && ctxRes.ok) { try { ctxData = await ctxRes.json(); } catch { /* swallow */ } }
 
   // Run selector comes from whichever endpoint actually returned runs.
-  const runs = (workflowData?.runs?.length ? workflowData.runs : (traceData?.runs?.length ? traceData.runs : ctxData?.runs)) || [];
-  const activeRunId = workflowData?.runId || traceData?.runId || ctxData?.runId || null;
+  const runs = (promptData?.runs?.length ? promptData.runs : (workflowData?.runs?.length ? workflowData.runs : (traceData?.runs?.length ? traceData.runs : ctxData?.runs))) || [];
+  const activeRunId = promptData?.runId || workflowData?.runId || traceData?.runId || ctxData?.runId || null;
 
   let html = renderRunSelector(runs, activeRunId);
+  html += '<div class="detail-section detail-section-prompt">';
+  html += '<div class="detail-section-title">Prompt Check</div>';
+  html += promptData ? renderPromptCheck(promptData) : '<div class="trace-header">No prompt check data for this run</div>';
+  html += '</div>';
   html += '<div class="detail-section detail-section-workflow">';
   html += '<div class="detail-section-title">Workflow Graph</div>';
   html += workflowData ? renderWorkflowGraph(workflowData) : '<div class="trace-header">No workflow data for this run</div>';
@@ -376,6 +390,73 @@ function renderRunSelector(runs, activeRunId) {
     html += `<button class="run-item${isActive ? ' run-active' : ''}" onclick="selectRun('${esc(r.runId)}')">${time} (${durStr}, ${stepsStr})${r.status === 'running' ? ' ●' : ''}</button>`;
   }
   html += '</div></div>';
+  return html;
+}
+
+function renderPromptCheck(data) {
+  const rules = data.rules || [];
+  const hooks = data.hooks || [];
+  const diagnostics = data.diagnostics || [];
+  const warnings = diagnostics.filter(d => d.severity === 'warning' || d.severity === 'error').length
+    + rules.filter(r => r.status && r.status !== 'ok').length;
+  let html = `<div class="prompt-check prompt-${esc(data.status || 'ok')}">`;
+  html += `<div class="prompt-check-head">
+    <span class="prompt-status">${esc(data.status || 'ok')}</span>
+    <strong>Rules: ${rules.length}</strong>
+    <span>Hooks: ${hooks.length}</span>
+    <span>Warnings: ${warnings}</span>
+  </div>`;
+
+  const visibleRules = rules.filter(r => r.status && r.status !== 'ok');
+  const okRules = rules.filter(r => r.status === 'ok').length;
+  if (visibleRules.length) {
+    html += '<div class="prompt-diagnostics">';
+    for (const r of visibleRules) {
+      const id = 'prompt-rule-' + r.ruleId.replace(/[^a-z0-9]/gi, '_');
+      html += `<button class="prompt-row prompt-${esc(r.status)}" onclick="toggleWorkflowDetail('${id}')">
+        <span class="prompt-kind">${esc(r.severity || 'warning')}</span>
+        <span class="prompt-title">${esc(r.title || r.ruleId)}</span>
+        <span class="prompt-message">${esc(r.message || '')}</span>
+      </button>`;
+      html += `<div id="${id}" class="workflow-detail prompt-detail hidden">
+        <div class="detail-row"><span class="detail-label">rule_id:</span> <code>${esc(r.ruleId)}</code></div>
+        ${(r.evidenceStepIds || []).map(s => `<div class="detail-row"><span class="detail-label">step_id:</span> <code>${esc(s)}</code></div>`).join('')}
+        ${(r.sourceFiles || []).map(s => `<div class="detail-row"><span class="detail-label">source:</span> <code>${esc(s)}</code></div>`).join('')}
+      </div>`;
+    }
+    html += '</div>';
+  }
+
+  if (diagnostics.length) {
+    html += '<div class="prompt-diagnostics">';
+    for (const d of diagnostics) {
+      const id = 'prompt-diag-' + d.id.replace(/[^a-z0-9]/gi, '_');
+      html += `<button class="prompt-row prompt-${esc(d.severity)}" onclick="toggleWorkflowDetail('${id}')">
+        <span class="prompt-kind">${esc(d.type)}</span>
+        <span class="prompt-title">${esc(d.message)}</span>
+      </button>`;
+      html += `<div id="${id}" class="workflow-detail prompt-detail hidden">`;
+      const prov = d.provenance || {};
+      for (const [k, v] of Object.entries(prov)) {
+        if (v == null || v === '') continue;
+        html += `<div class="detail-row"><span class="detail-label">${esc(k)}:</span> <code>${esc(String(v))}</code></div>`;
+      }
+      html += '</div>';
+    }
+    html += '</div>';
+  }
+
+  if (hooks.length) {
+    html += '<div class="prompt-hooks">';
+    for (const h of hooks.slice(0, 6)) {
+      html += `<span class="prompt-hook prompt-${esc(h.status)}" title="${esc(h.message || '')}">${esc(h.hookId)} · ${esc(h.event)}</span>`;
+    }
+    html += '</div>';
+  }
+  if (!visibleRules.length && !diagnostics.length) {
+    html += `<div class="prompt-ok">${okRules} rules passed${hooks.length ? ` · ${hooks.length} hook events bound` : ''}</div>`;
+  }
+  html += '</div>';
   return html;
 }
 
@@ -534,12 +615,12 @@ function workflowMessageForEvent(e, laneIndex) {
       return { from: childLane || e.laneId, to: 'runtime', label: `${childName} final answer`, subtitle: e.subtitle };
     case 'parent_resumed':
       return { from: 'runtime', to: 'parent', label: 'auto-resume parent', subtitle: e.subtitle };
-    case 'taskflow_plan_snapshot':
-      return { from: 'taskflow', to: 'taskflow', label: 'workflow snapshot', subtitle: e.subtitle };
-    case 'taskflow_child_bound':
-      return { from: 'runtime', to: 'taskflow', label: 'workflow child bound', subtitle: e.subtitle };
-    case 'taskflow_gap':
-      return { from: 'runtime', to: 'taskflow', label: e.title || 'workflow gap', subtitle: e.subtitle };
+    case 'workflow_state_snapshot':
+      return { from: 'workflow_state', to: 'workflow_state', label: 'workflow snapshot', subtitle: e.subtitle };
+    case 'workflow_state_child_bound':
+      return { from: 'runtime', to: 'workflow_state', label: 'workflow child bound', subtitle: e.subtitle };
+    case 'workflow_state_gap':
+      return { from: 'runtime', to: 'workflow_state', label: e.title || 'workflow gap', subtitle: e.subtitle };
     default:
       if (laneIndex.has(e.laneId)) return { from: e.laneId, to: e.laneId, label: e.title || e.type, subtitle: e.subtitle };
       return null;

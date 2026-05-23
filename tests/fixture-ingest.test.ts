@@ -116,7 +116,7 @@ assert(writeStep?.outputTokens === 40, "write per-tool tokens = 40");
 // Run 2 layout:
 //
 //   MODEL_THINK            (a-fix-3 has thinking)
-//   feishu_search_doc_wiki (mcp call)
+//   lark_search_doc_wiki (mcp call)
 //   TOOL_CALL              (r-fix-C as toolResult)
 //   MODEL_THINK            (a-fix-4 has thinking)
 //   REPLY                  (a-fix-4 has text)
@@ -129,9 +129,9 @@ assert(run2.steps.length === 5,
 
 // MCP tool detection
 const mcpStep = run2.steps.find((s: any) => s.nodeType === "MCP_CALL");
-assert(mcpStep != null, "feishu_search_doc_wiki classified as MCP_CALL");
-assert(mcpStep?.mcpTool === "feishu_search_doc_wiki", "mcpTool name preserved");
-assert(mcpStep?.mcpServer === "feishu", "mcpServer = 'feishu'");
+assert(mcpStep != null, "lark_search_doc_wiki classified as MCP_CALL");
+assert(mcpStep?.mcpTool === "lark_search_doc_wiki", "mcpTool name preserved");
+assert(mcpStep?.mcpServer === "lark", "mcpServer = 'lark'");
 // contextTokenDelta is intentionally undefined here: a-fix-3 is the FIRST
 // assistant message of run 2, so there is no `prevAssistantInputTokens`
 // from within the same run. The cross-run delta is checked in

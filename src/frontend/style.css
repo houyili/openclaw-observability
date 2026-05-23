@@ -127,6 +127,27 @@ tr:hover td { background: #161b22; }
 .run-toggle { background: #21262d; border: 1px solid #30363d; color: #8b949e; padding: 2px 8px; border-radius: 4px; cursor: pointer; font-size: 11px; }
 .run-toggle:hover { border-color: #58a6ff; color: #c9d1d9; }
 
+/* ─── Prompt Check ───────────────────────────────────────────── */
+.prompt-check { border: 1px solid #30363d; border-left: 4px solid #3fb950; border-radius: 6px; background: #0d1117; padding: 10px 11px; }
+.prompt-check.prompt-warning { border-left-color: #d29922; background: rgba(210,153,34,0.05); }
+.prompt-check.prompt-error { border-left-color: #f85149; background: rgba(248,81,73,0.05); }
+.prompt-check-head { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; color: #c9d1d9; font-size: 12px; margin-bottom: 8px; }
+.prompt-status { text-transform: uppercase; font-size: 10px; font-weight: 700; letter-spacing: 0.5px; color: #3fb950; }
+.prompt-warning .prompt-status { color: #d29922; }
+.prompt-error .prompt-status { color: #f85149; }
+.prompt-diagnostics { display: grid; gap: 4px; margin-top: 6px; }
+.prompt-row { display: grid; grid-template-columns: minmax(80px, 150px) minmax(140px, 260px) 1fr; gap: 8px; width: 100%; text-align: left; align-items: center; background: #161b22; border: 1px solid #30363d; border-radius: 4px; color: #c9d1d9; padding: 6px 8px; cursor: pointer; font: inherit; font-size: 11px; }
+.prompt-row:hover { border-color: #58a6ff; background: #1c2128; }
+.prompt-row.prompt-warning { border-left: 3px solid #d29922; }
+.prompt-row.prompt-error { border-left: 3px solid #f85149; }
+.prompt-kind { color: #8b949e; font-family: 'SF Mono', monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.prompt-title { color: #e6edf3; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.prompt-message { color: #8b949e; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.prompt-hooks { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
+.prompt-hook { color: #8b949e; background: #161b22; border: 1px solid #21262d; border-radius: 4px; padding: 2px 5px; font-size: 10px; }
+.prompt-hook.prompt-unbound { border-color: rgba(210,153,34,0.45); color: #d29922; }
+.prompt-ok { color: #8b949e; font-size: 12px; }
+
 /* ─── Workflow graph ─────────────────────────────────────────── */
 .workflow-view { overflow-x: auto; }
 .workflow-diagnostics { display: grid; gap: 4px; margin: 6px 0 12px; }
@@ -201,8 +222,8 @@ tr:hover td { background: #161b22; }
 .wf-type-sessions_spawn_requested, .wf-type-sessions_spawn_accepted { border-left-color: #ffa657; }
 .wf-type-sessions_yield, .wf-type-parent_resumed { border-left-color: #bc8cff; }
 .wf-type-child_started, .wf-type-child_artifact_written, .wf-type-child_final { border-left-color: #2ea043; }
-.wf-type-taskflow_plan_snapshot, .wf-type-taskflow_child_bound { border-left-color: #79c0ff; }
-.wf-type-taskflow_gap, .wf-event-warning { border-left-color: #f0883e; }
+.wf-type-workflow_state_snapshot, .wf-type-workflow_state_child_bound { border-left-color: #79c0ff; }
+.wf-type-workflow_state_gap, .wf-event-warning { border-left-color: #f0883e; }
 
 @media (max-width: 900px) {
   .workflow-grid { grid-template-columns: 1fr; min-width: 0; }

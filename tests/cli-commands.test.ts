@@ -50,25 +50,25 @@ const now = Date.now();
 // 5 sessions: 2 stuck, 1 with errors, 2 idle
 const sessionRows = [
   // 2 stuck
-  ["agent:test:s1", "sid-1", "main",  "feishu-direct", "user:ou_a", null, "direct",
+  ["agent:test:s1", "sid-1", "main",  "chat-direct", "user:demo-a", null, "direct",
     "gpt-5", "modelhub", 5000, 200, 5200, 100000, "default",
     1, 0, 0, 0, "stuck", "exec", "exec",
     now - 60_000, now, 60_000, "transcript+auth"],
-  ["agent:test:s2", "sid-2", "main",  "feishu-group",  "group:oc_b", null, "group",
+  ["agent:test:s2", "sid-2", "main",  "chat-group",  "group:oc_b", null, "group",
     "gpt-5", "modelhub", 8000, 300, 8300, 120000, "fast",
     2, 1, 0, 0, "stuck", "read", "read",
     now - 30_000, now, 30_000, "transcript+auth"],
   // 1 with no stuck blocker but with errors
-  ["agent:test:s3", "sid-3", "main",  "feishu-direct", "user:ou_c", null, "direct",
+  ["agent:test:s3", "sid-3", "main",  "chat-direct", "user:demo-c", null, "direct",
     "gpt-5", "modelhub", 30000, 1500, 31500, 80000, "default",
     5, 4, 1, 1, "idle", "write", null,
     null, now - 100, 0, "transcript+auth"],
   // 2 idle
-  ["agent:test:s4", "sid-4", "researcher", "feishu-group", "group:oc_d", null, "group",
+  ["agent:test:s4", "sid-4", "demo", "chat-group", "group:oc_d", null, "group",
     "gpt-5", "modelhub", 12000, 800, 12800, 60000, "default",
     3, 2, 0, 0, "idle", null, null,
     null, now - 200, 0, "transcript+auth"],
-  ["agent:test:s5", "sid-5", "survey", "feishu-direct", "user:ou_e", null, "direct",
+  ["agent:test:s5", "sid-5", "survey", "chat-direct", "user:demo-e", null, "direct",
     "gpt-5", "modelhub", 6000, 100, 6100, 40000, "default",
     1, 0, 0, 0, "idle", null, null,
     null, now - 300, 0, "transcript+auth"],
@@ -103,7 +103,7 @@ const stepRows = [
    500, null, 20, 100, 200, null, "ok", null, null, 0, 0, "fetch", null],
   // 2 MCP calls — one rate_limited
   ["st-mcp-1", "agent:test:s3", "run-1", null, 2, isoNow(-30_000), now - 30_000,
-   "assistant", "MCP_CALL", "feishu_search_doc_wiki", null, null, null, "feishu", "feishu_search_doc_wiki",
+   "assistant", "MCP_CALL", "lark_search_doc_wiki", null, null, null, "lark", "lark_search_doc_wiki",
    2000, null, 80, 200, 1500, 200, "ok", null, null, 0, 0, "search", null],
   ["st-mcp-2", "agent:test:s3", "run-1", null, 3, isoNow(-20_000), now - 20_000,
    "assistant", "MCP_CALL", "api-post-search", null, null, null, "notion", "api-post-search",
@@ -113,7 +113,7 @@ const stepRows = [
    "assistant", "TOOL_CALL", "exec", null, null, null, null, null,
    30000, null, 5, 50, 0, null, "error", "Request timed out ETIMEDOUT after 30s", "timeout", 0, 0, "exec curl", null],
   ["st-err-2", "agent:test:s5", "run-3", null, 0, isoNow(-5_000), now - 5_000,
-   "assistant", "MCP_CALL", "lark_create_doc", null, null, null, "feishu", "lark_create_doc",
+   "assistant", "MCP_CALL", "lark_create_doc", null, null, null, "lark", "lark_create_doc",
    500, null, 10, 30, 0, null, "error", "need_user_authorization", "auth_error", 0, 0, "create doc", null],
 ];
 for (const r of stepRows) stepInsert.run(...r as any[]);
@@ -212,7 +212,7 @@ console.log("\n=== /observ mcps ===");
   const result = dispatch(db, ["mcps"]);
   assert(result.exitCode === 0, "exit code 0");
   assertOutputClean("/observ mcps", result.text, 12);
-  assert(result.text.includes("feishu_search_doc_wiki"), "lists feishu_search_doc_wiki");
+  assert(result.text.includes("lark_search_doc_wiki"), "lists lark_search_doc_wiki");
   assert(result.text.includes("api-post-search"), "lists api-post-search");
   // api-post-search has 1 error out of 1 call → 100.0% error rate
   assert(result.text.includes("100.0%"), "api-post-search shows 100% error rate");

@@ -28,15 +28,15 @@ assert(classifyTool("process").nodeType === "INTERNAL_OP", "process → INTERNAL
 assert(classifyTool("cron").nodeType === "INTERNAL_OP", "cron → INTERNAL_OP");
 
 // MCP detection
-assert(classifyTool("feishu_search_doc_wiki").nodeType === "MCP_CALL", "feishu tool → MCP_CALL");
-assert(classifyTool("feishu_search_doc_wiki").mcpServer === "feishu", "feishu tool → server=feishu");
+assert(classifyTool("lark_search_doc_wiki").nodeType === "MCP_CALL", "prefix tool → MCP_CALL");
+assert(classifyTool("lark_search_doc_wiki").mcpServer === "lark", "prefix tool → server=lark");
 assert(classifyTool("api-post-search").nodeType === "MCP_CALL", "api-* → MCP_CALL");
 assert(classifyTool("api-post-search").mcpServer === "notion", "api-* → server=notion");
 assert(classifyTool("gateway").nodeType === "MCP_CALL", "gateway → MCP_CALL");
 assert(classifyTool("browser").nodeType === "MCP_CALL", "unknown tool → MCP_CALL");
 
 // exec → skill
-const skillExec = classifyTool("exec", { command: "python3 /Users/x/.openclaw/skills/arxiv-source-pipeline/scripts/arxiv_search.py query" });
+const skillExec = classifyTool("exec", { command: "python3 /tmp/openclaw-home/skills/arxiv-source-pipeline/scripts/arxiv_search.py query" });
 assert(skillExec.nodeType === "SKILL_EXEC", "exec with skill path → SKILL_EXEC");
 assert(skillExec.skillName === "arxiv-source-pipeline", "skill name extracted");
 assert(skillExec.scriptName === "arxiv_search.py", "script name extracted");

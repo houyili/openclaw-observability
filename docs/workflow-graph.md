@@ -46,12 +46,9 @@ The public event type names are stable for v0.1:
 - `child_artifact_written`
 - `child_final`
 - `parent_resumed`
-- `taskflow_plan_snapshot`
-- `taskflow_child_bound`
-- `taskflow_gap`
-
-The `taskflow_*` names are kept for wire compatibility. UI labels are generic
-workflow-state labels.
+- `workflow_state_snapshot`
+- `workflow_state_child_bound`
+- `workflow_state_gap`
 
 ## Provenance
 
@@ -80,6 +77,5 @@ waiting_children:
 <!-- openclaw-workflow:end -->
 ```
 
-Legacy managed workflow blocks are recognized for existing local data. Set
-`OBS_WORKFLOW_ADAPTERS=none` to disable all managed-workflow adapters, or set a
-comma-separated allowlist such as `openclaw-managed-workflow`.
+Set `OBS_WORKFLOW_ADAPTERS=none` to disable all managed-workflow adapters, or
+set a comma-separated allowlist such as `openclaw-managed-workflow`.

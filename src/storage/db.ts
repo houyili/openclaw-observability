@@ -145,6 +145,27 @@ function migrate(db: DatabaseSync): void {
     )
   `);
   ensureColumn(db, "ingest_state", "session_id", "TEXT");
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS hook_events (
+      event_id        TEXT PRIMARY KEY,
+      ts              TEXT NOT NULL,
+      ts_epoch_ms     INTEGER NOT NULL,
+      session_key     TEXT,
+      session_id      TEXT,
+      run_id          TEXT,
+      related_step_id TEXT,
+      hook_id         TEXT NOT NULL,
+      event           TEXT NOT NULL,
+      severity        TEXT DEFAULT 'info',
+      message         TEXT,
+      source_file     TEXT,
+      line_no         INTEGER,
+      raw_json        TEXT
+    )
+  `);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_hook_events_session ON hook_events(session_key, session_id, run_id, ts_epoch_ms)`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_hook_events_step ON hook_events(related_step_id) WHERE related_step_id IS NOT NULL`);
 }
 
 export function closeDb(): void {

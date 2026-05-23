@@ -310,7 +310,8 @@ export function recomputeAllSessionOps(onlyBaseKeys?: Set<string>): void {
       current_op    = ?,
       blocker       = ?,
       last_block_ts = ?,
-      diag_state    = ?
+      diag_state    = ?,
+      updated_at    = MAX(COALESCE(updated_at, 0), ?)
     WHERE session_key = ? OR session_key LIKE ?
   `);
   const now = Date.now();
@@ -318,7 +319,7 @@ export function recomputeAllSessionOps(onlyBaseKeys?: Set<string>): void {
   for (const baseKey of baseKeys) {
     const lastStep = lastStepStmt.get(baseKey) as any;
     if (!lastStep) {
-      updateStmt.run(null, null, null, "idle", baseKey, baseKey + ":run:%");
+      updateStmt.run(null, null, null, "idle", 0, baseKey, baseKey + ":run:%");
       continue;
     }
 
@@ -340,7 +341,7 @@ export function recomputeAllSessionOps(onlyBaseKeys?: Set<string>): void {
     }
     if (lastStep.status === "error") diagState = "stuck";
 
-    updateStmt.run(currentOp, blocker, blockTs, diagState, baseKey, baseKey + ":run:%");
+    updateStmt.run(currentOp, blocker, blockTs, diagState, lastStep.ts_epoch_ms || 0, baseKey, baseKey + ":run:%");
   }
 }
 

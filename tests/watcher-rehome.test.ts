@@ -39,7 +39,7 @@ function assert(cond: boolean, name: string, detail?: string) {
 const tmpHome = mkdtempSync(join(tmpdir(), "obs-watcher-rehome-"));
 mkdirSync(join(tmpHome, "logs/observability-v2"), { recursive: true });
 mkdirSync(join(tmpHome, "agents/main/sessions"), { recursive: true });
-mkdirSync(join(tmpHome, "agents/researcher/sessions"), { recursive: true });
+mkdirSync(join(tmpHome, "agents/demo/sessions"), { recursive: true });
 process.env.OPENCLAW_HOME = tmpHome;
 
 // Import obs-v2 modules after setting OPENCLAW_HOME
@@ -52,7 +52,7 @@ const { _resetSessionIdMapForTest } = watcher;
 
 // ─── Test constants ────────────────────────────────────────────
 const SUBAGENT_SESSION_ID = "b1f2c2fc-3e87-4b23-8347-04c121d2f83b";
-const PROPER_SESSION_KEY = "agent:researcher:subagent:36e648ee-1005-4fed-a43c-f57433975001";
+const PROPER_SESSION_KEY = "agent:demo:subagent:36e648ee-1005-4fed-a43c-f57433975001";
 
 // Minimal synthetic transcript: 1 user msg → 1 assistant msg with a read tool call + result + reply.
 // Each call gets a unique prefix so step_ids don't collide across test groups
@@ -114,7 +114,7 @@ console.log("\n=== Group 1: Raw UUID detection regex ===");
     "another raw UUID is detected");
   assert(isRawUuid("agent:main:cron:188f5830-305b-42ee-be30-cefd5a848e28") === false,
     "proper session_key with colons is NOT raw UUID");
-  assert(isRawUuid("agent:researcher:subagent:36e648ee-1005-4fed") === false,
+  assert(isRawUuid("agent:demo:subagent:36e648ee-1005-4fed") === false,
     "subagent key with colons is NOT raw UUID");
   assert(isRawUuid("") === false,
     "empty string is NOT raw UUID");
@@ -134,7 +134,7 @@ console.log("\n=== Group 2: resolveSessionKey priority ===");
   const db = getDb();
 
   // Write a sessions.json that maps SUBAGENT_SESSION_ID → PROPER_SESSION_KEY
-  const sessionsJsonPath = join(tmpHome, "agents/researcher/sessions/sessions.json");
+  const sessionsJsonPath = join(tmpHome, "agents/demo/sessions/sessions.json");
   const sessionsData: Record<string, any> = {};
   sessionsData[PROPER_SESSION_KEY] = { sessionId: SUBAGENT_SESSION_ID };
   writeFileSync(sessionsJsonPath, JSON.stringify(sessionsData));
@@ -145,7 +145,7 @@ console.log("\n=== Group 2: resolveSessionKey priority ===");
   // Case 1: session ID found in sessions.json map → proper key returned
   // We test this indirectly: write a transcript file named by session ID,
   // start the watcher, and verify steps land under the proper key.
-  const transcriptPath = join(tmpHome, "agents/researcher/sessions", `${SUBAGENT_SESSION_ID}.jsonl`);
+  const transcriptPath = join(tmpHome, "agents/demo/sessions", `${SUBAGENT_SESSION_ID}.jsonl`);
   writeFileSync(transcriptPath, buildSyntheticTranscript());
 
   // Force map rebuild so it picks up the freshly written sessions.json
@@ -293,7 +293,7 @@ console.log("\n=== Group 4: Proper key is NOT re-resolved ===");
   // The transcript from Group 2 (SUBAGENT_SESSION_ID) already has PROPER_SESSION_KEY.
   // Verify it stays stable even after another watcher tick.
 
-  const transcriptPath = join(tmpHome, "agents/researcher/sessions", `${SUBAGENT_SESSION_ID}.jsonl`);
+  const transcriptPath = join(tmpHome, "agents/demo/sessions", `${SUBAGENT_SESSION_ID}.jsonl`);
   // Append a line to trigger reparse
   writeFileSync(transcriptPath, readFileSync(transcriptPath, "utf-8") + "\n");
 

@@ -9,6 +9,7 @@ export const CONFIG = {
   AGENTS_DIR: join(HOME, "agents"),
   DB_PATH: join(HOME, "logs/observability-v2/obs.db"),
   OTEL_EVENTS_FILE: join(HOME, "logs/research-observability/events.jsonl"),
+  HOOK_REMINDERS_FILE: join(HOME, "logs/hooks/reminders.jsonl"),
 
   // Network
   HOST: "127.0.0.1",
@@ -22,6 +23,7 @@ export const CONFIG = {
   // OTel is only used for diagnosticState — tail 200KB of events.jsonl.
   // We also gate the tick by file mtime so unchanged = no work.
   OTEL_POLL_MS: 15_000,
+  HOOK_POLL_MS: 5_000,
   // recomputeAllSessionOps is a heavy DB pass (one aggregation per base key).
   // It does NOT need to run on every OTel tick — 30s is plenty for current_op/blocker freshness.
   RECOMPUTE_OPS_MS: 30_000,

@@ -1,6 +1,6 @@
 /**
- * Live end-to-end correctness sweep against the user's actual production
- * obs-v2 install. This is the test the user asked for in Round 5:
+ * Live end-to-end correctness sweep against the local obs-v2 install.
+ * This is the test requested in Round 5:
  *
  *   "想办法用本机的目前的生产数据做一轮端到端的正确性校验"
  *

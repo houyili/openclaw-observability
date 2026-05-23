@@ -2,6 +2,7 @@ import { statSync } from "node:fs";
 import { CONFIG } from "./config.ts";
 import { getDb, closeDb } from "./storage/db.ts";
 import { startTranscriptWatcher } from "./ingest/transcript-watcher.ts";
+import { startHookReminderWatcher } from "./ingest/hook-reminder-reader.ts";
 import { pollAuthSessionsAsync, readSessionStoreExtras } from "./ingest/auth-poller.ts";
 import { readLatestOtelStates } from "./ingest/otel-reader.ts";
 import { scanAll } from "./ingest/registry-scanner.ts";
@@ -133,6 +134,8 @@ const watcher = startTranscriptWatcher({
   },
 });
 
+const hookWatcher = startHookReminderWatcher();
+
 // ─── Startup recompute (catch up on data from previous runs) ────
 recomputeAllSessionCounts();
 recomputeAllSessionOps(); // full pass once, then incremental via dirtyBaseKeys
@@ -145,6 +148,7 @@ startServer();
 function shutdown(): void {
   console.log("\n[observability-v2] Shutting down...");
   watcher.stop();
+  hookWatcher.stop();
   clearInterval(authInterval);
   clearInterval(otelInterval);
   clearInterval(recomputeInterval);

@@ -34,7 +34,7 @@ function assert(cond: boolean, name: string, detail?: string) {
 // ─── Isolated OPENCLAW_HOME ────────────────────────────────────
 const tmpHome = mkdtempSync(join(tmpdir(), "obs-parent-child-"));
 mkdirSync(join(tmpHome, "logs/observability-v2"), { recursive: true });
-mkdirSync(join(tmpHome, "agents/researcher/sessions"), { recursive: true });
+mkdirSync(join(tmpHome, "agents/demo/sessions"), { recursive: true });
 mkdirSync(join(tmpHome, "agents/main/sessions"), { recursive: true });
 process.env.OPENCLAW_HOME = tmpHome;
 
@@ -110,10 +110,10 @@ console.log("\n=== Group 1: Schema migration ===");
 console.log("\n=== Group 2: updateSessionParent ===");
 // ================================================================
 {
-  const parentKey = "agent:researcher:feishu:direct:ou_parent1";
-  const childKey = "agent:researcher:subagent:child-aaa";
+  const parentKey = "agent:demo:chat:direct:local-parent1";
+  const childKey = "agent:demo:subagent:child-aaa";
   insertSession(childKey, "sid-c1");
-  insertSession(parentKey, "sid-p1", { channel: "feishu-direct" });
+  insertSession(parentKey, "sid-p1", { channel: "chat-direct" });
 
   // Set parent (with session_id)
   updateSessionParent(childKey, parentKey, "sid-p1");
@@ -144,13 +144,13 @@ console.log("\n=== Group 3: getChildCounts ===");
   // Clear and set up fresh data
   db.prepare("DELETE FROM sessions").run();
 
-  const parent1 = "agent:main:feishu:group:parent-g1";
+  const parent1 = "agent:main:chat:group:parent-g1";
   const parent2 = "agent:main:cron:parent-c1";
-  const noChildren = "agent:main:feishu:direct:no-kids";
+  const noChildren = "agent:main:chat:direct:no-kids";
 
-  insertSession(parent1, "sid-p1", { channel: "feishu-group" });
+  insertSession(parent1, "sid-p1", { channel: "chat-group" });
   insertSession(parent2, "sid-p2", { channel: "cron" });
-  insertSession(noChildren, "sid-nc", { channel: "feishu-direct" });
+  insertSession(noChildren, "sid-nc", { channel: "chat-direct" });
 
   // 3 children for parent1 (linked by parent_session_id = "sid-p1")
   insertSession("agent:main:subagent:ch1", "sid-ch1", { parentSessionKey: parent1, parentSessionId: "sid-p1" });
@@ -197,26 +197,26 @@ console.log("\n=== Group 4: getChildSessions ===");
 console.log("\n=== Group 5: readSessionStoreExtras extracts spawnedBy ===");
 // ================================================================
 {
-  // Write a fake sessions.json for researcher agent
+  // Write a fake sessions.json for demo agent
   const sessionsJson = {
-    "agent:researcher:subagent:sub-x1": {
+    "agent:demo:subagent:sub-x1": {
       sessionId: "sid-x1",
       label: "research sub 1",
-      spawnedBy: "agent:researcher:feishu:group:oc_fakechat1",
+      spawnedBy: "agent:demo:chat:group:oc_fakechat1",
     },
-    "agent:researcher:feishu:group:oc_fakechat1": {
+    "agent:demo:chat:group:oc_fakechat1": {
       sessionId: "sid-gc1",
-      label: "main feishu group",
+      label: "main chat group",
       // no spawnedBy — top-level session
     },
-    "agent:researcher:subagent:sub-x2": {
+    "agent:demo:subagent:sub-x2": {
       sessionId: "sid-x2",
       // no label, has spawnedBy
-      spawnedBy: "agent:researcher:feishu:group:oc_fakechat1",
+      spawnedBy: "agent:demo:chat:group:oc_fakechat1",
     },
   };
   writeFileSync(
-    join(tmpHome, "agents/researcher/sessions/sessions.json"),
+    join(tmpHome, "agents/demo/sessions/sessions.json"),
     JSON.stringify(sessionsJson),
   );
   // Write empty for main agent
@@ -228,12 +228,12 @@ console.log("\n=== Group 5: readSessionStoreExtras extracts spawnedBy ===");
   const extras = readSessionStoreExtras();
 
   // sub-x1: has both label and spawnedBy → parentSessionId resolved from parent's sessionId
-  const ex1 = extras.get("agent:researcher:subagent:sub-x1");
+  const ex1 = extras.get("agent:demo:subagent:sub-x1");
   assert(ex1 !== undefined, "sub-x1 found in extras");
   assert(ex1?.label === "research sub 1", "sub-x1 label correct");
   assert(ex1?.sessionId === "sid-x1", "sub-x1 own sessionId extracted");
   assert(
-    ex1?.parentSessionKey === "agent:researcher:feishu:group:oc_fakechat1",
+    ex1?.parentSessionKey === "agent:demo:chat:group:oc_fakechat1",
     "sub-x1 spawnedBy (key) extracted correctly",
   );
   assert(
@@ -243,13 +243,13 @@ console.log("\n=== Group 5: readSessionStoreExtras extracts spawnedBy ===");
   );
 
   // top-level session: no spawnedBy
-  const ex2 = extras.get("agent:researcher:feishu:group:oc_fakechat1");
+  const ex2 = extras.get("agent:demo:chat:group:oc_fakechat1");
   assert(ex2 !== undefined, "group session found in extras");
   assert(ex2?.parentSessionKey === null, "group session has no parent key");
   assert(ex2?.parentSessionId === null, "group session has no parent session_id");
 
   // sub-x2: no label, has spawnedBy → parentSessionId also resolved
-  const ex3 = extras.get("agent:researcher:subagent:sub-x2");
+  const ex3 = extras.get("agent:demo:subagent:sub-x2");
   assert(ex3?.label === null, "sub-x2 label is null");
   assert(ex3?.parentSessionId === "sid-gc1", "sub-x2 parentSessionId resolved");
 }
@@ -260,11 +260,11 @@ console.log("\n=== Group 6: Chain relationship A -> B -> C ===");
 {
   db.prepare("DELETE FROM sessions").run();
 
-  const a = "agent:main:feishu:group:chain-root";
+  const a = "agent:main:chat:group:chain-root";
   const b = "agent:main:subagent:chain-mid";
   const c = "agent:main:subagent:chain-leaf";
 
-  insertSession(a, "sid-a", { channel: "feishu-group" });
+  insertSession(a, "sid-a", { channel: "chat-group" });
   insertSession(b, "sid-b", { parentSessionKey: a, parentSessionId: "sid-a" });
   insertSession(c, "sid-c", { parentSessionKey: b, parentSessionId: "sid-b" });
 
@@ -340,13 +340,13 @@ console.log("\n=== Group 9: getParentInfoBatch ===");
 {
   db.prepare("DELETE FROM sessions").run();
 
-  const parent1 = "agent:main:feishu:group:info-parent1";
-  const parent2 = "agent:researcher:cron:info-parent2";
-  insertSession(parent1, "sid-ip1", { channel: "feishu-group", agentId: "main" });
+  const parent1 = "agent:main:chat:group:info-parent1";
+  const parent2 = "agent:demo:cron:info-parent2";
+  insertSession(parent1, "sid-ip1", { channel: "chat-group", agentId: "main" });
   // Set label on parent1
   db.prepare("UPDATE sessions SET label = 'My Research Group', diag = 'group:oc_abc123' WHERE session_key = ?").run(parent1);
 
-  insertSession(parent2, "sid-ip2", { channel: "cron", agentId: "researcher" });
+  insertSession(parent2, "sid-ip2", { channel: "cron", agentId: "demo" });
   db.prepare("UPDATE sessions SET diag = 'cron:deadbeef' WHERE session_key = ?").run(parent2);
 
   // getParentInfoBatch now takes session_ids
@@ -362,7 +362,7 @@ console.log("\n=== Group 9: getParentInfoBatch ===");
   const p2 = info.get("sid-ip2");
   assert(p2?.label === null, "parent2 label is null (not set)");
   assert(p2?.diag === "cron:deadbeef", "parent2 diag is correct");
-  assert(p2?.agentId === "researcher", "parent2 agentId is correct");
+  assert(p2?.agentId === "demo", "parent2 agentId is correct");
 
   // Empty input
   const empty = getParentInfoBatch([]);
@@ -375,8 +375,8 @@ console.log("\n=== Group 10: getAllSessions with parentKey filter ===");
 {
   db.prepare("DELETE FROM sessions").run();
 
-  const parent = "agent:main:feishu:group:filter-parent";
-  insertSession(parent, "sid-fp", { channel: "feishu-group", agentId: "main" });
+  const parent = "agent:main:chat:group:filter-parent";
+  insertSession(parent, "sid-fp", { channel: "chat-group", agentId: "main" });
   insertSession("agent:main:subagent:filter-c1", "sid-fc1", { parentSessionKey: parent, agentId: "main" });
   insertSession("agent:main:subagent:filter-c2", "sid-fc2", { parentSessionKey: parent, agentId: "main" });
   insertSession("agent:main:subagent:other-child", "sid-oc", {

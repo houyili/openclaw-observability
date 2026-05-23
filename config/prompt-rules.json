@@ -1,0 +1,60 @@
+{
+  "version": 1,
+  "rules": [
+    {
+      "ruleId": "read_source_skill_before_source_ops",
+      "title": "Read workflow skill before source operations",
+      "severity": "warning",
+      "sourceFiles": ["config/prompt-rules.json"],
+      "evidenceMatchers": {
+        "requiredBefore": "source_op",
+        "requiredTool": "read",
+        "requiredPathIncludes": "SKILL.md"
+      },
+      "failureMessage": "Source operations appeared before reading a workflow skill."
+    },
+    {
+      "ruleId": "checkpoint_before_sessions_yield",
+      "title": "Checkpoint before sessions_yield",
+      "severity": "warning",
+      "sourceFiles": ["config/prompt-rules.json"],
+      "evidenceMatchers": {
+        "requiredBefore": "sessions_yield",
+        "requiredArtifactPattern": "checkpoint|work_status\\.md|source_collection"
+      },
+      "failureMessage": "Parent yielded before a visible checkpoint or work_status write."
+    },
+    {
+      "ruleId": "spawn_accept_must_have_child_key_run_id",
+      "title": "Spawn accepted result must include child key and run id",
+      "severity": "warning",
+      "sourceFiles": ["config/prompt-rules.json"],
+      "evidenceMatchers": {
+        "toolName": "sessions_spawn",
+        "requiredResultFields": ["childSessionKey", "runId"]
+      },
+      "failureMessage": "sessions_spawn result did not expose both childSessionKey and runId."
+    },
+    {
+      "ruleId": "accepted_child_should_be_visible",
+      "title": "Accepted child should be visible",
+      "severity": "warning",
+      "sourceFiles": ["config/prompt-rules.json"],
+      "evidenceMatchers": {
+        "requiresExactChildSessionKey": true,
+        "requiresExactChildRunId": true
+      },
+      "failureMessage": "Accepted child session/run has no visible transcript steps."
+    },
+    {
+      "ruleId": "workflow_state_should_bind_child_or_show_gap",
+      "title": "Workflow state should bind child or show gap",
+      "severity": "warning",
+      "sourceFiles": ["config/prompt-rules.json"],
+      "evidenceMatchers": {
+        "requiresWorkflowBoundOrGap": true
+      },
+      "failureMessage": "Accepted child was neither bound in workflow state nor represented as a visible workflow gap."
+    }
+  ]
+}

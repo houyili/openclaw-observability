@@ -3,6 +3,7 @@ import { getAllSessions, getSession, getChildCounts, getParentInfoBatch } from "
 import { getLatestRun, getRunList, getTraceSpans, getActivityBars } from "../storage/steps-repo.ts";
 import { getContextBoth } from "../storage/context-repo.ts";
 import { getWorkflowGraph } from "../storage/workflow-repo.ts";
+import { getPromptCheck } from "../storage/prompt-check-repo.ts";
 
 type SendJson = (res: ServerResponse, data: unknown, status?: number) => void;
 
@@ -105,6 +106,10 @@ export const handleSessionsRoutes = {
 
   workflow(key: string, query: Record<string, string>, res: ServerResponse, sendJson: SendJson) {
     return sendJson(res, getWorkflowGraph(key, query.runId, query.sessionId));
+  },
+
+  promptCheck(key: string, query: Record<string, string>, res: ServerResponse, sendJson: SendJson) {
+    return sendJson(res, getPromptCheck(key, query.runId, query.sessionId));
   },
 
   trace(key: string, query: Record<string, string>, res: ServerResponse, sendJson: SendJson) {
