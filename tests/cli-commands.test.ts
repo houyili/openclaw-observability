@@ -125,6 +125,13 @@ regInsert.run("skill", "paper-interpretation", "/tmp/paper-interpretation", "act
 regInsert.run("skill", "lark-docs-api-first", "/tmp/lark-docs-api-first", "active", isoNow(), isoNow());
 regInsert.run("script", "render.py", "/tmp/paper-interpretation/scripts/render.py", "active", isoNow(), isoNow());
 regInsert.run("script", "fetch.sh", "/tmp/lark-docs-api-first/scripts/fetch.sh", "active", isoNow(), isoNow());
+// MCP entries are required because getMcpStats now LEFT JOINs registry
+// (§4.3.1 — installed MCPs surface even without calls; the inverse is
+// that "called but not in registry" rows are intentionally invisible
+// because we cannot prove they were ever installed).
+regInsert.run("mcp", "lark_search_doc_wiki", "npx lark-mcp", "active", isoNow(), isoNow());
+regInsert.run("mcp", "api-post-search", "npx notion-mcp",  "active", isoNow(), isoNow());
+regInsert.run("mcp", "lark_create_doc",    "npx lark-mcp", "active", isoNow(), isoNow());
 
 // ─── Helpers for assertion ──────────────────────────────────────
 const EMOJI_RE = /[\u{1F300}-\u{1FAFF}]/u;

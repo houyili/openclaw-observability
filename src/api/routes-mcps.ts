@@ -14,7 +14,15 @@ export function handleMcpsRoute(query: Record<string, string>, res: ServerRespon
     mcps: rows.map((r: any) => ({
       name: r.name,
       server: r.server,
-      installed: true,
+      path: r.path,
+      // status: 'active' (disk scan saw it this run),
+      //        'observed' (lazy-learned from transcript only),
+      //        'removed' (was in registry but disk scan missed it).
+      // installed: true when the MCP currently sits in the registry
+      // for any reason; the dashboard can downgrade the badge based
+      // on status separately.
+      status: r.reg_status || "observed",
+      installed: r.reg_status !== "removed",
       callCount: r.call_count,
       avgDurationMs: r.avg_duration_ms ? Math.round(r.avg_duration_ms) : null,
       p95DurationMs: r.p95_duration_ms ?? null,

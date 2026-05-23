@@ -250,26 +250,52 @@ export function getScriptStats(range: string, q?: string) {
 export function getMcpStats(range: string, q?: string) {
   const db = getDb();
   const since = rangeToEpoch(range);
+
+  // §4.3.1: Tab 4 must list every installed MCP, including ones with
+  // no calls. We mirror getSkillStats's LEFT JOIN shape so installed
+  // MCPs appear with call_count = 0 / error_rate = 0 instead of being
+  // invisible. The join is scoped by node_type='MCP_CALL' and the
+  // active time window so unused MCPs surface at the bottom of the
+  // table without polluting numerator/denominator for active ones.
+  //
+  // mcp_server for never-called rows comes from the most-recent
+  // observed step (if any); otherwise NULL is acceptable — Tab 4
+  // surfaces the registry name as the canonical identifier.
   let sql = `
-    SELECT mcp_tool as name, mcp_server as server,
-      COUNT(*) as call_count,
-      AVG(duration_ms) as avg_duration_ms,
-      CAST(SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) AS REAL) / COUNT(*) as error_rate,
-      SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) as error_count,
-      SUM(CASE WHEN is_stuck = 1 THEN 1 ELSE 0 END) as stuck_count,
-      AVG(result_text_len) as avg_result_bytes,
-      AVG(context_token_delta) as avg_context_token_delta
-    FROM steps
-    WHERE node_type = 'MCP_CALL' AND ts_epoch_ms >= ?
+    SELECT r.name as name,
+      (SELECT s2.mcp_server FROM steps s2
+        WHERE s2.mcp_tool = r.name AND s2.node_type = 'MCP_CALL'
+        ORDER BY s2.ts_epoch_ms DESC LIMIT 1) as server,
+      r.status as reg_status,
+      r.path as path,
+      COUNT(s.step_id) as call_count,
+      AVG(s.duration_ms) as avg_duration_ms,
+      CASE WHEN COUNT(s.step_id) > 0
+        THEN CAST(SUM(CASE WHEN s.status = 'error' THEN 1 ELSE 0 END) AS REAL) / COUNT(s.step_id)
+        ELSE 0 END as error_rate,
+      SUM(CASE WHEN s.status = 'error' THEN 1 ELSE 0 END) as error_count,
+      SUM(CASE WHEN s.is_stuck = 1 THEN 1 ELSE 0 END) as stuck_count,
+      AVG(s.result_text_len) as avg_result_bytes,
+      AVG(s.context_token_delta) as avg_context_token_delta
+    FROM registry r
+    LEFT JOIN steps s
+      ON s.mcp_tool = r.name
+     AND s.node_type = 'MCP_CALL'
+     AND s.ts_epoch_ms >= ?
+    WHERE r.type = 'mcp'
   `;
   const params: any[] = [since];
-  if (q) { sql += " AND mcp_tool LIKE ?"; params.push(`%${q}%`); }
-  sql += " GROUP BY mcp_tool, mcp_server ORDER BY call_count DESC";
+  if (q) { sql += " AND r.name LIKE ?"; params.push(`%${q}%`); }
+  // Order by call_count DESC then name so installed-but-unused MCPs
+  // group together alphabetically at the bottom of the list.
+  sql += " GROUP BY r.name, r.status, r.path ORDER BY call_count DESC, r.name ASC";
   const rows = db.prepare(sql).all(...params) as any[];
 
   const p95 = computeP95ByBucket(db, "steps", "mcp_tool", since, "AND node_type = 'MCP_CALL'");
   for (const row of rows) {
     row.p95_duration_ms = p95.get(row.name) ?? null;
+    row.error_count = row.error_count || 0;
+    row.stuck_count = row.stuck_count || 0;
   }
   return rows;
 }
