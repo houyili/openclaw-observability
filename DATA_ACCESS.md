@@ -77,6 +77,7 @@ GROUP BY token_source;
 curl http://127.0.0.1:18902/healthz
 curl http://127.0.0.1:18902/api/summary
 curl http://127.0.0.1:18902/api/sessions
+curl http://127.0.0.1:18902/api/sessions/ENCODED_KEY/prompt-check
 curl http://127.0.0.1:18902/api/sessions/ENCODED_KEY/workflow
 curl http://127.0.0.1:18902/api/sessions/ENCODED_KEY/trace
 curl http://127.0.0.1:18902/api/sessions/ENCODED_KEY/context
@@ -86,7 +87,7 @@ curl http://127.0.0.1:18902/api/mcps?range=all
 curl http://127.0.0.1:18902/api/registry
 ```
 
-`/workflow`, `/trace`, and `/context` accept optional `runId` and
+`/prompt-check`, `/workflow`, `/trace`, and `/context` accept optional `runId` and
 `sessionId` query parameters.
 
 ## Correctness Checks

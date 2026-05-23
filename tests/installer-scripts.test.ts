@@ -20,17 +20,30 @@ function assert(cond: boolean, name: string, detail?: string) {
 }
 
 const tmpHome = mkdtempSync(join(tmpdir(), "obs-installer-"));
-const scripts = ["common.sh", "install.sh", "uninstall.sh", "upgrade.sh", "doctor.sh", "service.sh"];
+const scripts = ["common.sh", "install.sh", "uninstall.sh", "upgrade.sh", "doctor.sh", "service.sh", "tunnel.sh", "tunnel-ngrok.sh"];
 const baseEnv = {
   ...process.env,
   HOME: tmpHome,
   OPENCLAW_HOME: tmpHome,
   OBS_SERVICE_PLIST: join(tmpHome, "service.plist"),
   OBS_SYSTEMD_SERVICE: join(tmpHome, "openclaw-observability.service"),
+  OBS_AUTH_TOKEN: "",
+  OBS_ALLOW_UNAUTH_TUNNEL: "",
+  OBS_NGROK_DOMAIN: "",
+  OBS_FIXED_URL: "",
+  OBS_ENV_FILE: join(tmpHome, ".env"),
 };
 
 function run(args: string[], env = baseEnv): string {
   return execFileSync(args[0], args.slice(1), { env, encoding: "utf-8" });
+}
+
+function runMaybe(args: string[], env = baseEnv): { ok: boolean; out: string } {
+  try {
+    return { ok: true, out: run(args, env) };
+  } catch (err: any) {
+    return { ok: false, out: String(err.stdout || "") + String(err.stderr || "") };
+  }
 }
 
 console.log("\n=== Group 1: shell syntax ===");
@@ -62,6 +75,24 @@ console.log("\n=== Group 3: doctor is read-only and tolerant ===");
   assert(doctor.includes("Dependencies"), "doctor checks dependencies");
   assert(doctor.includes("Configuration"), "doctor checks configuration");
   assert(doctor.includes("Summary"), "doctor prints summary");
+}
+
+console.log("\n=== Group 4: tunnel URL safety ===");
+{
+  const cloudflareNoToken = runMaybe(["bash", "scripts/tunnel.sh", "url"]);
+  assert(!cloudflareNoToken.ok, "cloudflare tunnel refuses URL without token");
+  assert(cloudflareNoToken.out.includes("OBS_AUTH_TOKEN"), "cloudflare tunnel explains token requirement");
+
+  const ngrokNoToken = runMaybe(["bash", "scripts/tunnel-ngrok.sh", "url"]);
+  assert(!ngrokNoToken.ok, "ngrok tunnel refuses URL without token");
+  assert(ngrokNoToken.out.includes("OBS_AUTH_TOKEN"), "ngrok tunnel explains token requirement");
+
+  const tunnelSource = run(["sed", "-n", "1,220p", "scripts/tunnel.sh"]);
+  const ngrokSource = run(["sed", "-n", "1,180p", "scripts/tunnel-ngrok.sh"]);
+  assert(tunnelSource.includes("#token="), "cloudflare tunnel uses URL fragment token");
+  assert(ngrokSource.includes("#token="), "ngrok tunnel uses URL fragment token");
+  assert(!tunnelSource.includes("?token="), "cloudflare tunnel does not put token in query string");
+  assert(!ngrokSource.includes("?token="), "ngrok tunnel does not put token in query string");
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

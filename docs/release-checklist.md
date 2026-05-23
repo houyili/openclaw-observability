@@ -31,6 +31,7 @@ Confirm the repo does not include:
 
 - `.env`
 - generated `*.plist`
+- generated systemd unit files
 - logs or SQLite DB files
 - OpenClaw runtime state
 - browser state or local caches

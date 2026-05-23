@@ -107,4 +107,11 @@ Then run:
 ```bash
 python3 scripts/install_ngrok.py
 ./scripts/tunnel-ngrok.sh start
+./scripts/tunnel-ngrok.sh url
 ```
+
+Set `OBS_AUTH_TOKEN` before exposing the dashboard remotely. Sharing URLs use
+`#token=...`, so the token is kept in the browser fragment instead of the HTTP
+request line. For an unauthenticated local-only demo, set
+`OBS_ALLOW_UNAUTH_TUNNEL=1` explicitly; otherwise tunnel scripts refuse to
+return a public URL without auth.

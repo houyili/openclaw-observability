@@ -77,12 +77,17 @@ Copy `.env.example` to `.env`. Values may be unquoted or quoted.
 | Key | Purpose |
 | --- | --- |
 | `OBS_AUTH_TOKEN` | Optional bearer token for non-local API requests |
+| `OBS_ALLOW_UNAUTH_TUNNEL` | Defaults to `0`; set to `1` only to allow an unauthenticated public tunnel |
 | `OBS_NGROK_DOMAIN` | Optional fixed ngrok domain for `scripts/tunnel-ngrok.sh` |
 | `OBS_FIXED_URL` | Optional public URL hint for external integrations |
 
 When `OBS_AUTH_TOKEN` is set, non-local `/api/*` requests require
 `Authorization: Bearer <token>` or `?token=<token>`. Localhost, static
 assets, and `/healthz` remain accessible.
+
+Tunnel scripts refuse to expose a public URL unless `OBS_AUTH_TOKEN` is set,
+unless you explicitly opt into `OBS_ALLOW_UNAUTH_TUNNEL=1`. Generated sharing
+URLs use `#token=...` so the token stays in the browser fragment.
 
 Operational constants such as the port, poll cadence, and stuck threshold
 live in `src/config.ts`.
@@ -148,11 +153,13 @@ Every workflow event includes provenance such as `step_id`, `run_id`,
 
 More detail:
 
+- [`docs/user-manual.md`](docs/user-manual.md)
 - [`docs/architecture.md`](docs/architecture.md)
 - [`docs/workflow-graph.md`](docs/workflow-graph.md)
 - [`docs/prompt-check.md`](docs/prompt-check.md)
 - [`docs/install/macos.md`](docs/install/macos.md)
 - [`docs/install/linux.md`](docs/install/linux.md)
+- [`docs/install/cloudflare.md`](docs/install/cloudflare.md)
 - [`docs/compatibility.md`](docs/compatibility.md)
 - [`docs/release-checklist.md`](docs/release-checklist.md)
 - [`CHANGELOG.md`](CHANGELOG.md)

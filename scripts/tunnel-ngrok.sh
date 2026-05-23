@@ -22,19 +22,52 @@ mkdir -p "$LOG_DIR"
 DOMAIN="${OBS_NGROK_DOMAIN:-$(obs_read_env_value OBS_NGROK_DOMAIN "$ENV_FILE")}"
 TOKEN="${OBS_AUTH_TOKEN:-$(obs_read_env_value OBS_AUTH_TOKEN "$ENV_FILE")}"
 FIXED_URL="${OBS_FIXED_URL:-$(obs_read_env_value OBS_FIXED_URL "$ENV_FILE")}"
+ALLOW_UNAUTH="${OBS_ALLOW_UNAUTH_TUNNEL:-$(obs_read_env_value OBS_ALLOW_UNAUTH_TUNNEL "$ENV_FILE")}"
 
 is_running() {
   [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null
 }
 
+allow_unauth_tunnel() {
+  [ "$ALLOW_UNAUTH" = "1" ] || [ "$ALLOW_UNAUTH" = "true" ] || [ "$ALLOW_UNAUTH" = "yes" ]
+}
+
+require_share_auth() {
+  if [ -z "$TOKEN" ] && ! allow_unauth_tunnel; then
+    echo '{"status":"error","error":"Refusing to expose dashboard without OBS_AUTH_TOKEN. Set OBS_AUTH_TOKEN or explicitly set OBS_ALLOW_UNAUTH_TUNNEL=1."}'
+    return 1
+  fi
+}
+
+share_url() {
+  url="$1"
+  if [ -n "$TOKEN" ]; then
+    printf '%s/#token=%s' "$url" "$TOKEN"
+  else
+    printf '%s' "$url"
+  fi
+}
+
+json_url_field() {
+  url="$1"
+  shared=$(share_url "$url")
+  if [ -n "$TOKEN" ]; then
+    printf '"url":"%s"' "$shared"
+  else
+    printf '"url":"%s","warning":"unauthenticated tunnel explicitly allowed"' "$shared"
+  fi
+}
+
 do_start() {
+  require_share_auth || exit 1
+
   if [ -z "$DOMAIN" ]; then
     echo '{"status":"error","error":"No OBS_NGROK_DOMAIN in .env. Run: python3 scripts/install_ngrok.py"}'
     exit 1
   fi
 
   if is_running; then
-    echo "{\"status\":\"already_running\",\"url\":\"https://${DOMAIN}\"}"
+    echo "{\"status\":\"already_running\",$(json_url_field "https://${DOMAIN}")}"
     return
   fi
 
@@ -45,13 +78,13 @@ do_start() {
   # Wait for tunnel to be ready
   for i in $(seq 1 15); do
     if curl -s --max-time 3 "https://${DOMAIN}/healthz" >/dev/null 2>&1; then
-      echo "{\"status\":\"started\",\"url\":\"https://${DOMAIN}\"}"
+      echo "{\"status\":\"started\",$(json_url_field "https://${DOMAIN}")}"
       return
     fi
     sleep 1
   done
 
-  echo "{\"status\":\"started\",\"url\":\"https://${DOMAIN}\",\"note\":\"may still be connecting\"}"
+  echo "{\"status\":\"started\",$(json_url_field "https://${DOMAIN}"),\"note\":\"may still be connecting\"}"
 }
 
 do_stop() {
@@ -67,7 +100,11 @@ do_stop() {
 
 do_status() {
   if is_running; then
-    echo "{\"status\":\"running\",\"url\":\"https://${DOMAIN}\"}"
+    if require_share_auth >/dev/null; then
+      echo "{\"status\":\"running\",$(json_url_field "https://${DOMAIN}")}"
+    else
+      echo '{"status":"running","url":"redacted","warning":"set OBS_AUTH_TOKEN or OBS_ALLOW_UNAUTH_TUNNEL=1 to reveal public URL"}'
+    fi
   else
     rm -f "$PID_FILE"
     echo '{"status":"not_running"}'
@@ -75,6 +112,8 @@ do_status() {
 }
 
 do_url() {
+  require_share_auth || return
+
   if [ -z "$DOMAIN" ]; then
     echo '{"status":"error","error":"Not configured. Run: python3 scripts/install_ngrok.py"}'
     return
@@ -87,11 +126,7 @@ do_url() {
   fi
 
   URL="https://${DOMAIN}"
-  if [ -n "$TOKEN" ]; then
-    echo "{\"status\":\"ok\",\"url\":\"${URL}/?token=${TOKEN}\"}"
-  else
-    echo "{\"status\":\"ok\",\"url\":\"${URL}\"}"
-  fi
+  echo "{\"status\":\"ok\",$(json_url_field "$URL")}"
 }
 
 case "${1:-url}" in

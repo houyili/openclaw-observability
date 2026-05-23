@@ -11,12 +11,15 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 . "$SCRIPT_DIR/env.sh"
 
 CLOUDFLARED="${CLOUDFLARED_BIN:-$(which cloudflared 2>/dev/null || echo "$HOME/.local/bin/cloudflared")}"
+ENV_FILE="${OBS_ENV_FILE:-$(obs_env_file)}"
 LOG_DIR="$HOME/.openclaw/logs/observability-v2"
 PID_FILE="$LOG_DIR/tunnel.pid"
 URL_FILE="$LOG_DIR/tunnel-url.txt"
 TUNNEL_LOG="$LOG_DIR/tunnel.log"
 DASHBOARD_PORT=18902
 TIMEOUT=20
+TOKEN="${OBS_AUTH_TOKEN:-$(obs_read_env_value OBS_AUTH_TOKEN "$ENV_FILE")}"
+ALLOW_UNAUTH="${OBS_ALLOW_UNAUTH_TUNNEL:-$(obs_read_env_value OBS_ALLOW_UNAUTH_TUNNEL "$ENV_FILE")}"
 
 mkdir -p "$LOG_DIR"
 
@@ -29,9 +32,41 @@ extract_url() {
   grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' "$TUNNEL_LOG" 2>/dev/null | tail -1
 }
 
+allow_unauth_tunnel() {
+  [ "$ALLOW_UNAUTH" = "1" ] || [ "$ALLOW_UNAUTH" = "true" ] || [ "$ALLOW_UNAUTH" = "yes" ]
+}
+
+require_share_auth() {
+  if [ -z "$TOKEN" ] && ! allow_unauth_tunnel; then
+    echo '{"status":"error","error":"Refusing to expose dashboard without OBS_AUTH_TOKEN. Set OBS_AUTH_TOKEN or explicitly set OBS_ALLOW_UNAUTH_TUNNEL=1."}'
+    return 1
+  fi
+}
+
+share_url() {
+  url="$1"
+  if [ -n "$TOKEN" ]; then
+    printf '%s/#token=%s' "$url" "$TOKEN"
+  else
+    printf '%s' "$url"
+  fi
+}
+
+json_url_field() {
+  url="$1"
+  shared=$(share_url "$url")
+  if [ -n "$TOKEN" ]; then
+    printf '"url":"%s"' "$shared"
+  else
+    printf '"url":"%s","warning":"unauthenticated tunnel explicitly allowed"' "$shared"
+  fi
+}
+
 do_start() {
+  require_share_auth || exit 1
+
   if ! command -v "$CLOUDFLARED" >/dev/null 2>&1; then
-    echo '{"status":"error","error":"cloudflared not installed. Run: curl -sL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-darwin-arm64.tgz | tar xz -C ~/.local/bin/"}'
+    echo '{"status":"error","error":"cloudflared not installed. Install from https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/ or set CLOUDFLARED_BIN."}'
     exit 1
   fi
 
@@ -45,7 +80,7 @@ do_start() {
     URL=$(extract_url)
     if [ -n "$URL" ]; then
       echo "$URL" > "$URL_FILE"
-      echo "{\"status\":\"already_running\",\"url\":\"$URL\"}"
+      echo "{\"status\":\"already_running\",$(json_url_field "$URL")}"
       return
     fi
     # Running but no URL yet — kill and restart
@@ -66,7 +101,7 @@ do_start() {
     URL=$(extract_url)
     if [ -n "$URL" ]; then
       echo "$URL" > "$URL_FILE"
-      echo "{\"status\":\"started\",\"url\":\"$URL\",\"pid\":$TUNNEL_PID}"
+      echo "{\"status\":\"started\",$(json_url_field "$URL"),\"pid\":$TUNNEL_PID}"
       return
     fi
     sleep 1
@@ -91,7 +126,15 @@ do_status() {
   if is_running; then
     URL=$(cat "$URL_FILE" 2>/dev/null || extract_url)
     PID=$(cat "$PID_FILE")
-    echo "{\"status\":\"running\",\"url\":\"${URL:-unknown}\",\"pid\":$PID}"
+    if [ -n "$URL" ]; then
+      if require_share_auth >/dev/null; then
+        echo "{\"status\":\"running\",$(json_url_field "$URL"),\"pid\":$PID}"
+      else
+        echo "{\"status\":\"running\",\"url\":\"redacted\",\"pid\":$PID,\"warning\":\"set OBS_AUTH_TOKEN or OBS_ALLOW_UNAUTH_TUNNEL=1 to reveal public URL\"}"
+      fi
+    else
+      echo "{\"status\":\"running\",\"url\":\"unknown\",\"pid\":$PID}"
+    fi
   else
     rm -f "$PID_FILE" "$URL_FILE"
     echo '{"status":"not_running"}'
@@ -100,6 +143,8 @@ do_status() {
 
 do_url() {
   # Return just the URL with token appended (for the skill)
+  require_share_auth || return
+
   if is_running; then
     URL=$(cat "$URL_FILE" 2>/dev/null || extract_url)
     if [ -n "$URL" ]; then
@@ -114,12 +159,7 @@ do_url() {
         URL=$(cat "$URL_FILE" 2>/dev/null || extract_url)
       fi
       if [ -n "$URL" ]; then
-        TOKEN="${OBS_AUTH_TOKEN:-$(obs_read_env_value OBS_AUTH_TOKEN "${OBS_ENV_FILE:-$(obs_env_file)}")}"
-        if [ -n "$TOKEN" ]; then
-          echo "{\"status\":\"ok\",\"url\":\"${URL}/#token=${TOKEN}\"}"
-        else
-          echo "{\"status\":\"ok\",\"url\":\"${URL}\",\"note\":\"No OBS_AUTH_TOKEN configured\"}"
-        fi
+        echo "{\"status\":\"ok\",$(json_url_field "$URL")}"
         return
       fi
     fi
@@ -129,11 +169,8 @@ do_url() {
   sleep 3
   # Read fresh URL
   URL=$(cat "$URL_FILE" 2>/dev/null || extract_url)
-  TOKEN="${OBS_AUTH_TOKEN:-$(obs_read_env_value OBS_AUTH_TOKEN "${OBS_ENV_FILE:-$(obs_env_file)}")}"
-  if [ -n "$URL" ] && [ -n "$TOKEN" ]; then
-    echo "{\"status\":\"ok\",\"url\":\"${URL}/#token=${TOKEN}\"}"
-  elif [ -n "$URL" ]; then
-    echo "{\"status\":\"ok\",\"url\":\"${URL}\"}"
+  if [ -n "$URL" ]; then
+    echo "{\"status\":\"ok\",$(json_url_field "$URL")}"
   else
     echo "{\"status\":\"error\",\"error\":\"Failed to start tunnel\"}"
   fi

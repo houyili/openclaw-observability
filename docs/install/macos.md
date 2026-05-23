@@ -67,10 +67,25 @@ logs, the SQLite DB, or the git checkout.
 
 ## Optional ngrok Tunnel
 
+Set `OBS_AUTH_TOKEN` before exposing the dashboard remotely. Sharing URLs use
+`#token=...` so the token is kept in the browser fragment.
+
 ```bash
 python3 scripts/install_ngrok.py
 ./scripts/tunnel-ngrok.sh start
 ./scripts/tunnel-ngrok.sh url
 ```
 
-Set `OBS_AUTH_TOKEN` before exposing the dashboard remotely.
+For an unauthenticated local-only demo, set `OBS_ALLOW_UNAUTH_TUNNEL=1`
+explicitly. The tunnel scripts otherwise refuse to return a public URL without
+auth.
+
+## Optional Cloudflare Quick Tunnel
+
+Install `cloudflared` from the Cloudflare downloads page or set
+`CLOUDFLARED_BIN`, then run:
+
+```bash
+./scripts/tunnel.sh start
+./scripts/tunnel.sh url
+```
