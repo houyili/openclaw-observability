@@ -1,0 +1,8 @@
+{
+  "_comment": "Synthetic mcporter-style file for the obs-v2 demo. No real credentials.",
+  "mcpServers": {
+    "exa":    { "baseUrl": "https://demo-mcp.example/exa" },
+    "reddit": { "command": "demo-reddit-mcp" },
+    "hf":     { "baseUrl": "https://demo-mcp.example/hf" }
+  }
+}

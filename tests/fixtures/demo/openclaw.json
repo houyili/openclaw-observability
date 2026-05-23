@@ -1,0 +1,16 @@
+{
+  "_comment": "Synthetic OpenClaw config for the obs-v2 demo mode. No real credentials or identifiers.",
+  "agents": {
+    "demo-research":   { "model": { "primary": "demo-fast-model" } },
+    "demo-publishing": { "model": { "primary": "demo-fast-model" } }
+  },
+  "mcp": {
+    "servers": {
+      "notion": {
+        "command": "demo-notion-mcp",
+        "args": ["--demo"],
+        "env": { "NOTION_API_KEY": "demo-fake" }
+      }
+    }
+  }
+}

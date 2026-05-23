@@ -12,8 +12,11 @@ export const CONFIG = {
   HOOK_REMINDERS_FILE: join(HOME, "logs/hooks/reminders.jsonl"),
 
   // Network
-  HOST: "127.0.0.1",
-  PORT: 18902,
+  HOST: process.env.OBS_HOST || "127.0.0.1",
+  // Honoring OBS_PORT lets the demo mode (and any other side-by-side
+  // launch) run without colliding with the user's primary obs-v2
+  // service. Falls back to the canonical 18902.
+  PORT: Number(process.env.OBS_PORT) || 18902,
 
   // Poll intervals
   // auth-poller calls `openclaw sessions --all-agents --active N --json` which

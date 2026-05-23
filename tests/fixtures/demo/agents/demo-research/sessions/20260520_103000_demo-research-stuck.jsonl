@@ -1,0 +1,2 @@
+{"type":"message","id":"u-st-1","parentId":"","timestamp":"2026-05-20T10:30:00.000Z","message":{"role":"user","content":[{"type":"text","text":"crawl this slow url and return contents"}]}}
+{"type":"message","id":"a-st-1","parentId":"u-st-1","timestamp":"2026-05-20T10:30:03.000Z","message":{"role":"assistant","content":[{"type":"thinking","text":"I'll use a generic web fetch tool"},{"type":"toolCall","name":"web_fetch","id":"tc-st-A","input":{"url":"https://slow-demo.example.com/large-page"}}],"usage":{"input":900,"output":80,"cacheRead":0,"totalTokens":980}}}

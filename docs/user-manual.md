@@ -47,6 +47,38 @@ cp .env.example .env
 npm run start
 ```
 
+## Demo Mode
+
+If you do not have an OpenClaw install handy and just want to see what
+the dashboard looks like, the repository ships a small synthetic
+dataset and a one-shot launcher:
+
+```bash
+./scripts/demo.sh
+```
+
+By default this seeds `/tmp/obs-v2-demo-home` with three demo
+sessions, four MCPs (one unused), three skills (one unused), and a few
+short transcripts, then starts the dashboard against that home on
+[http://127.0.0.1:18902](http://127.0.0.1:18902). Your real
+`~/.openclaw/` directory and any running observability service are
+untouched.
+
+Options:
+
+| Option | Effect |
+| --- | --- |
+| `--target /path` | use a different demo home directory |
+| `--port 18903` | start the demo dashboard on a different port (default `18902`) |
+| `--force` | overwrite an already-populated demo home |
+| `--seed-only` | seed the demo home and print the start command without launching |
+| `--help` | show help |
+
+When you are done, delete `/tmp/obs-v2-demo-home` (or whatever
+`--target` you used) and you are back to a clean state. Run
+`./scripts/demo.sh --port 18903` to keep the demo dashboard alongside
+your real service.
+
 ## Requirements
 
 | Requirement | Notes |
