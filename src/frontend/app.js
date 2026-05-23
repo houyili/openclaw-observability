@@ -1,11 +1,14 @@
-// ─── Auth token from URL hash (#token=) or query param (?token=) ─
+// ─── Auth token from URL hash (#token=) or legacy query param (?token=) ─
 const hashToken = (location.hash.match(/token=([^&]+)/) || [])[1]
   || new URLSearchParams(location.search).get('token')
   || '';
 function authFetch(url, opts) {
-  const sep = url.includes('?') ? '&' : '?';
-  const authUrl = hashToken ? `${url}${sep}token=${encodeURIComponent(hashToken)}` : url;
-  return fetch(authUrl, opts);
+  if (!hashToken) return fetch(url, opts);
+  const nextOpts = Object.assign({}, opts || {});
+  nextOpts.headers = Object.assign({}, nextOpts.headers || {}, {
+    Authorization: `Bearer ${decodeURIComponent(hashToken)}`,
+  });
+  return fetch(url, nextOpts);
 }
 
 // ─── State ──────────────────────────────────────────────────────

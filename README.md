@@ -77,13 +77,15 @@ Copy `.env.example` to `.env`. Values may be unquoted or quoted.
 | Key | Purpose |
 | --- | --- |
 | `OBS_AUTH_TOKEN` | Optional bearer token for non-local API requests |
-| `OBS_ALLOW_UNAUTH_TUNNEL` | Defaults to `0`; set to `1` only to allow an unauthenticated public tunnel |
+| `OBS_ALLOW_UNAUTH_TUNNEL` | Defaults to `0`; set to `1` only for a temporary unauthenticated tunnel demo |
 | `OBS_NGROK_DOMAIN` | Optional fixed ngrok domain for `scripts/tunnel-ngrok.sh` |
 | `OBS_FIXED_URL` | Optional public URL hint for external integrations |
 
-When `OBS_AUTH_TOKEN` is set, non-local `/api/*` requests require
-`Authorization: Bearer <token>` or `?token=<token>`. Localhost, static
-assets, and `/healthz` remain accessible.
+When `OBS_AUTH_TOKEN` is set, non-local `/api/*` requests should use
+`Authorization: Bearer <token>`. Browser sharing URLs should use
+`#token=...`; query-string tokens remain accepted for compatibility but are
+not recommended for shared tunnel URLs. Localhost, static assets, and
+`/healthz` remain accessible.
 
 Tunnel scripts refuse to expose a public URL unless `OBS_AUTH_TOKEN` is set,
 unless you explicitly opt into `OBS_ALLOW_UNAUTH_TUNNEL=1`. Generated sharing

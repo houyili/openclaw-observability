@@ -19,8 +19,8 @@ function checkAuth(req: IncomingMessage, query: Record<string, string>): boolean
   const host = req.headers.host || "";
   if (host.startsWith("127.0.0.1") || host.startsWith("localhost")) return true;
   const path = (req.url || "").split("?")[0];
-  // Allow static assets without token (CSS/JS/HTML, healthz)
-  // The frontend JS reads the token from the URL and attaches it to API calls
+  // Allow static assets without token (CSS/JS/HTML, healthz).
+  // The frontend reads #token from the URL and sends API auth as a bearer header.
   if (path === "/" || path === "/index.html" || path.endsWith(".css") || path.endsWith(".js") || path.startsWith("/healthz")) return true;
   // API endpoints require token
   const authHeader = req.headers.authorization || "";

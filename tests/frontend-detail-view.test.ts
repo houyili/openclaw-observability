@@ -43,10 +43,11 @@ function assert(cond: boolean, name: string, detail?: string) {
 interface LoadedCtx {
   ctx: any;
   setFetchResponse: (pattern: string, payload: unknown, opts?: { ok?: boolean }) => void;
+  fetchCalls: Array<{ url: string; opts: any }>;
   getDetailHtml: () => string;
 }
 
-function loadAppJs(): LoadedCtx {
+function loadAppJs(options: { hash?: string; search?: string } = {}): LoadedCtx {
   let code = readFileSync(join(REPO_ROOT, "src/frontend/app.js"), "utf-8");
   // Strip the boot block so refresh() + setInterval don't run implicitly.
   code = code.replace(/\/\/ Boot\s*\nrefresh\(\);\s*\nsetInterval\(refresh, 5000\);\s*$/m, "/* test: boot skipped */");
@@ -105,7 +106,9 @@ function loadAppJs(): LoadedCtx {
 
   interface FakeResponse { ok: boolean; json: () => Promise<unknown>; }
   const fetchResponses = new Map<string, { payload: unknown; ok: boolean }>();
-  async function fakeFetch(url: string): Promise<FakeResponse> {
+  const fetchCalls: Array<{ url: string; opts: any }> = [];
+  async function fakeFetch(url: string, opts?: any): Promise<FakeResponse> {
+    fetchCalls.push({ url, opts });
     for (const [pat, v] of fetchResponses) {
       if (url.includes(pat)) {
         return { ok: v.ok, json: async () => v.payload };
@@ -116,7 +119,7 @@ function loadAppJs(): LoadedCtx {
 
   const ctx: any = {
     document: fakeDoc,
-    location: { hash: "", search: "" },
+    location: { hash: options.hash || "", search: options.search || "" },
     navigator: {},
     fetch: fakeFetch as any,
     setInterval: () => 0,
@@ -151,6 +154,7 @@ function loadAppJs(): LoadedCtx {
     setFetchResponse: (pattern, payload, opts) => {
       fetchResponses.set(pattern, { payload, ok: opts?.ok ?? true });
     },
+    fetchCalls,
     getDetailHtml: () => fakeDoc.getElementById("session-detail").innerHTML as string,
   };
 }
@@ -438,6 +442,19 @@ console.log("\n=== Group 8: structural file invariants ===");
   assert(css.includes(".detail-section-title"), "detail-section-title CSS present");
   assert(!css.includes(".view-selector"), "view-selector CSS removed");
   assert(!css.includes(".view-item"), "view-item CSS removed");
+}
+
+// ─── Group 9: fragment tokens use Authorization header ─────────
+console.log("\n=== Group 9: authFetch token transport ===");
+{
+  const loaded = loadAppJs({ hash: "#token=abc%20123" });
+  loaded.setFetchResponse("/api/summary", { totalSessions: 1 });
+  await loaded.ctx.refreshSummary();
+  const call = loaded.fetchCalls.find(c => c.url.includes("/api/summary"));
+  assert(!!call, "summary request captured");
+  assert(call?.url === "/api/summary", "auth token is not appended to API query string", `url=${call?.url}`);
+  assert(call?.opts?.headers?.Authorization === "Bearer abc 123",
+    "auth token is sent with Authorization header");
 }
 
 // ─── Summary ───────────────────────────────────────────────────
