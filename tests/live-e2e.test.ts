@@ -42,6 +42,7 @@ import { DatabaseSync } from "node:sqlite";
 import { execSync, spawnSync } from "node:child_process";
 import { CONFIG } from "../src/config.ts";
 import { parseTranscript, type TranscriptEntry } from "../src/ingest/transcript-parser.ts";
+import { redactKey } from "./_lib/redact.ts";
 
 let passed = 0;
 let failed = 0;
@@ -116,7 +117,7 @@ const topSessions = db.prepare(`
 `).all() as any[];
 
 for (const sess of topSessions) {
-  console.log(`  • ${sess.session_key.slice(0, 64)}  (${sess.step_count} steps)`);
+  console.log(`  • ${redactKey(sess.session_key)}  (${sess.step_count} steps)`);
 }
 assert(topSessions.length > 0, "found at least one non-cron session with steps");
 
@@ -127,7 +128,7 @@ let totalRunsChecked = 0;
 let driftedRuns = 0;
 
 for (const sess of topSessions) {
-  const tag = sess.session_key.slice(0, 60);
+  const tag = redactKey(sess.session_key);
   const filePath = findFileForSession(sess.session_key, sess.session_id);
   if (!filePath || !existsSync(filePath)) {
     console.log(`  [skip] ${tag} — no live transcript file (likely historical)`);
@@ -228,7 +229,7 @@ if (cliJson) {
     ).get(target.key, target.sessionId) as any;
 
     assert(dbRow != null,
-      `obs.db has the largest active session ${target.key.slice(0, 50)}`);
+      `obs.db has the largest active session ${redactKey(target.key)}`);
 
     if (dbRow) {
       assert(dbRow.input_tokens === target.inputTokens,

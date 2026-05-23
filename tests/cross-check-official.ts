@@ -23,6 +23,7 @@ import { execSync } from "node:child_process";
 import { DatabaseSync } from "node:sqlite";
 import { setTimeout as sleep } from "node:timers/promises";
 import { CONFIG } from "../src/config.ts";
+import { redactKey, redactId } from "./_lib/redact.ts";
 
 // ─── Config ─────────────────────────────────────────────────────
 
@@ -196,14 +197,14 @@ console.log(`  allowed backfills:     ${allowedBackfills.length}  (official zero
 
 if (missing.length > 0) {
   console.log("\n  missing (first 5):");
-  for (const m of missing.slice(0, 5)) console.log(`    ${m.key}  sid=${m.sessionId.slice(0, 8)}`);
+  for (const m of missing.slice(0, 5)) console.log(`    ${redactKey(m.key)}  sid=${redactId(m.sessionId)}`);
 }
 
 if (allowedBackfills.length > 0) {
   console.log("\n  allowed transcript backfills (first 5):");
   for (const m of allowedBackfills.slice(0, 5)) {
     console.log(`    ${m.field}: official=0 obs=${m.obs} source=transcript-backfill`);
-    console.log(`      ${m.key}  sid=${m.sessionId.slice(0, 8)}`);
+    console.log(`      ${redactKey(m.key)}  sid=${redactId(m.sessionId)}`);
   }
 }
 
@@ -211,7 +212,7 @@ if (mismatches.length > 0) {
   console.log("\n  mismatches (first 10):");
   for (const m of mismatches.slice(0, 10)) {
     console.log(`    ${m.field}: official=${m.official} obs=${m.obs} diff=${m.diff}`);
-    console.log(`      ${m.key}  sid=${m.sessionId.slice(0, 8)}`);
+    console.log(`      ${redactKey(m.key)}  sid=${redactId(m.sessionId)}`);
   }
   console.log("\n  RESULT: FAIL");
   process.exit(1);

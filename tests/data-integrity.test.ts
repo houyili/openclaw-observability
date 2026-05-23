@@ -42,6 +42,7 @@
 import { existsSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { CONFIG } from "../src/config.ts";
+import { redactKey, redactId } from "./_lib/redact.ts";
 
 let passed = 0;
 let failed = 0;
@@ -358,7 +359,7 @@ console.log("\n=== E. Round 6: Context Length live invariants ===");
   }
 
   for (const r of sampleRuns) {
-    const tag = `${r.session_key.slice(0, 50)} run=${r.run_id.slice(0, 8)}`;
+    const tag = `${redactKey(r.session_key)} run=${redactId(r.run_id)}`;
 
     const breakdown = getContextBreakdown(r.session_key, r.run_id);
     if (!breakdown) {
@@ -546,7 +547,7 @@ console.log("\n=== G. Workflow Graph projection self-validation ===");
   let warnings = 0;
   for (const c of candidates) {
     const graph = getWorkflowGraph(c.session_key, c.run_id, c.session_id);
-    const tag = `${c.kind} ${c.session_key.slice(0, 48)} run=${c.run_id.slice(0, 8)} sid=${(c.session_id || "-").slice(0, 8)}`;
+    const tag = `${c.kind} ${redactKey(c.session_key)} run=${redactId(c.run_id)} sid=${redactId(c.session_id)}`;
     const errorChecks = graph.validation.checks.filter(ch => ch.status === "error");
     const warningChecks = graph.validation.checks.filter(ch => ch.status === "warning");
     warnings += warningChecks.length;
