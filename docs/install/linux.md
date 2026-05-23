@@ -115,3 +115,33 @@ Set `OBS_AUTH_TOKEN` before exposing the dashboard remotely. Sharing URLs use
 a temporary unauthenticated demo, set `OBS_ALLOW_UNAUTH_TUNNEL=1` explicitly;
 otherwise tunnel scripts refuse to return a public URL without auth. Do not use
 unauthenticated tunnels for shared or long-lived access.
+
+## Distribution Packaging
+
+OpenClaw Observability v0 does **not** ship as a distribution package.
+There is no `apt` package, no `rpm`, no `snap`, no Homebrew formula, and
+no Docker image in this release.
+
+The supported install paths on Linux are:
+
+- `./scripts/install.sh` — sets up a user systemd service
+- `npm run start` — foreground mode
+- `./scripts/demo.sh` — synthetic dataset demo without OpenClaw
+
+This is a deliberate scope choice for v0.1.x: distribution packaging
+multiplies the release surface (signing, distro-specific service
+managers, distro-specific Node policies) and we want to learn from real
+user installs first.
+
+If you would like a packaging format added, please open a
+[feature request](../../.github/ISSUE_TEMPLATE/feature_request.md) and
+describe your deployment context (single host vs fleet, base distro,
+update cadence, signing requirements). Likely candidates for v0.2 or
+v0.3, in order of demand we have heard:
+
+1. A multi-arch Docker image plus a `docker-compose.yml` example.
+2. A Homebrew tap covering both macOS and Linux.
+3. A `deb` package for Debian/Ubuntu user systemd installs.
+
+None of the above is committed work; this list exists so the v0
+disclaimer is paired with a concrete forward path.
