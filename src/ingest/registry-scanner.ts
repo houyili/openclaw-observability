@@ -1,5 +1,5 @@
 import { readdirSync, existsSync, readFileSync } from "node:fs";
-import { join, basename, dirname } from "node:path";
+import { join } from "node:path";
 import { CONFIG } from "../config.ts";
 
 export interface RegistryEntry {
@@ -12,12 +12,14 @@ export interface RegistryEntry {
 /** All directories under OPENCLAW_HOME that may contain skills. */
 function getSkillSearchDirs(): string[] {
   const home = CONFIG.OPENCLAW_HOME;
-  const dirs = [
-    join(home, "skills"),
-    join(home, "workspace/skills"),
-    join(home, "workspace-researcher/skills"),
-    join(home, "workspace-survey/skills"),
-  ];
+  const dirs = [join(home, "skills")];
+  if (!existsSync(home)) return [];
+  for (const entry of readdirSync(home, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    if (entry.name === "workspace" || entry.name.startsWith("workspace-")) {
+      dirs.push(join(home, entry.name, "skills"));
+    }
+  }
   return dirs.filter(d => existsSync(d));
 }
 

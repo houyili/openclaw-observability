@@ -16,6 +16,9 @@ Do not commit:
 
 Only `.env.example` and `*.plist.template` should be versioned.
 
+Run `./scripts/doctor.sh` after installation to check for accidentally
+tracked local config, generated service files, or runtime data.
+
 ## HTTP Auth
 
 Set `OBS_AUTH_TOKEN` in `.env` before exposing the dashboard through a tunnel

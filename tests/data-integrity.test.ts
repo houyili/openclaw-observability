@@ -500,6 +500,74 @@ console.log("\n=== F. Round 7: Parent-child session integrity ===");
     "F.4: idx_sessions_parent index exists");
 }
 
+// ─── G. Workflow Graph projection self-validation ──────────────
+console.log("\n=== G. Workflow Graph projection self-validation ===");
+{
+  const { getWorkflowGraph } = await import("../src/storage/workflow-repo.ts");
+
+  const spawnedRuns = db.prepare(`
+    SELECT session_key, session_id, run_id, MAX(ts_epoch_ms) as latest_ts,
+           SUM(CASE WHEN tool_name = 'sessions_spawn' OR node_type = 'SUBAGENT_SPAWN' THEN 1 ELSE 0 END) as spawns
+    FROM steps
+    GROUP BY session_key, session_id, run_id
+    HAVING spawns > 0
+    ORDER BY latest_ts DESC
+    LIMIT 8
+  `).all() as Array<{ session_key: string; session_id: string | null; run_id: string; latest_ts: number; spawns: number }>;
+
+  const recentRuns = db.prepare(`
+    SELECT session_key, session_id, run_id, MAX(ts_epoch_ms) as latest_ts, COUNT(*) as n
+    FROM steps
+    GROUP BY session_key, session_id, run_id
+    ORDER BY latest_ts DESC
+    LIMIT 8
+  `).all() as Array<{ session_key: string; session_id: string | null; run_id: string; latest_ts: number; n: number }>;
+
+  const seen = new Set<string>();
+  const candidates: Array<{ session_key: string; session_id: string | null; run_id: string; kind: string }> = [];
+  for (const r of spawnedRuns) {
+    const id = `${r.session_key}\n${r.session_id || ""}\n${r.run_id}`;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    candidates.push({ session_key: r.session_key, session_id: r.session_id, run_id: r.run_id, kind: "spawn" });
+  }
+  for (const r of recentRuns) {
+    const id = `${r.session_key}\n${r.session_id || ""}\n${r.run_id}`;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    candidates.push({ session_key: r.session_key, session_id: r.session_id, run_id: r.run_id, kind: "recent" });
+    if (candidates.length >= 12) break;
+  }
+
+  if (candidates.length === 0) {
+    console.log("  (no workflow candidates in live steps table)");
+  }
+
+  let warnings = 0;
+  for (const c of candidates) {
+    const graph = getWorkflowGraph(c.session_key, c.run_id, c.session_id);
+    const tag = `${c.kind} ${c.session_key.slice(0, 48)} run=${c.run_id.slice(0, 8)} sid=${(c.session_id || "-").slice(0, 8)}`;
+    const errorChecks = graph.validation.checks.filter(ch => ch.status === "error");
+    const warningChecks = graph.validation.checks.filter(ch => ch.status === "warning");
+    warnings += warningChecks.length;
+
+    assert(graph.validation.status !== "error",
+      `${tag}: workflow validation has no errors`,
+      errorChecks.map(ch => `${ch.id}: ${ch.message}`).join("; "));
+    assert(errorChecks.length === 0,
+      `${tag}: no error-level validation checks`,
+      errorChecks.map(ch => `${ch.id}: ${ch.message}`).join("; "));
+    assert(graph.validation.checks.length >= 8,
+      `${tag}: workflow validation ran core checks`,
+      `checks=${graph.validation.checks.length}`);
+    assert(graph.runId === c.run_id,
+      `${tag}: graph runId matches requested runId`,
+      `graph=${graph.runId}`);
+  }
+
+  console.log(`  (workflow self-validation sampled ${candidates.length} runs, warning checks: ${warnings})`);
+}
+
 db.close();
 
 // ─── Summary ────────────────────────────────────────────────────

@@ -14,4 +14,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+      - run: bash -n scripts/*.sh
+      - run: python3 -m py_compile scripts/install_ngrok.py
       - run: npm run test:hermetic
+      - run: ./scripts/install.sh --dry-run --yes --no-start

@@ -95,7 +95,7 @@ function parentDisplayName(s) {
   // Fallback: parse the key
   if (!s.parentSessionKey) return '';
   const p = s.parentSessionKey.split(':');
-  // "agent:researcher:feishu:group:oc_xxx" → "feishu:group"
+  // "agent:main:channel:group:oc_xxx" -> "channel:group"
   if (p.length >= 4) return p[2] + ':' + p[3];
   return p.slice(-2).join(':');
 }
@@ -385,12 +385,27 @@ function renderWorkflowGraph(data) {
   const edges = data.edges || [];
   const diagnostics = data.diagnostics || [];
   const validation = data.validation || null;
-  if (!events.length) return '<div class="trace-header">No workflow events for this run</div>';
-
-  const laneIndex = new Map(lanes.map((lane, i) => [lane.id, i]));
+  const attention = data.attention || null;
   const validationStatus = validation?.status || 'unknown';
   const validationChecks = validation?.checks || [];
   const validationBad = validationChecks.filter(c => c.status && c.status !== 'ok');
+  if (!events.length) {
+    let emptyHtml = `<div class="trace-header">
+      No workflow events for this run &middot;
+      <strong>Data:</strong> <span class="workflow-validation wf-${esc(validationStatus)}">${esc(validationStatus)}${validationBad.length ? ` ${validationBad.length}` : ''}</span>
+    </div>`;
+    if (attention) emptyHtml += renderWorkflowAttention(attention);
+    if (validationBad.length) {
+      emptyHtml += '<div class="workflow-diagnostics">';
+      for (const c of validationBad) {
+        emptyHtml += `<div class="workflow-diagnostic wf-${esc(c.status)}">validation ${esc(c.id)}: ${esc(c.message)}</div>`;
+      }
+      emptyHtml += '</div>';
+    }
+    return emptyHtml;
+  }
+
+  const laneIndex = new Map(lanes.map((lane, i) => [lane.id, i]));
   let html = `<div class="workflow-view" style="--wf-lanes:${Math.max(1, lanes.length)}">`;
   html += `<div class="trace-header">
     <strong>Run:</strong> ${esc((data.runId || '').slice(0,8) || 'latest')} &middot;
@@ -398,6 +413,7 @@ function renderWorkflowGraph(data) {
     <strong>Edges:</strong> ${edges.length} &middot;
     <strong>Data:</strong> <span class="workflow-validation wf-${esc(validationStatus)}">${esc(validationStatus)}${validationBad.length ? ` ${validationBad.length}` : ''}</span>
   </div>`;
+  if (attention) html += renderWorkflowAttention(attention);
   if (validationBad.length) {
     html += '<div class="workflow-diagnostics">';
     for (const c of validationBad) {
@@ -441,7 +457,8 @@ function renderWorkflowGraph(data) {
         const posStyle = dir === 'self'
           ? `left:calc(${fromCenter.toFixed(4)}% - 58px);width:116px;`
           : `left:${left.toFixed(4)}%;width:${width.toFixed(4)}%;`;
-        html += `<button class="sequence-message wf-type-${esc(e.type)} sequence-${dir}${e.status === 'warning' ? ' wf-event-warning' : ''}" style="${posStyle}" onclick="toggleWorkflowDetail('${detailId}')">
+        const attnHit = attention && (attention.eventId === e.id || (attention.stepId && e.provenance?.step_id === attention.stepId));
+        html += `<button class="sequence-message wf-type-${esc(e.type)} sequence-${dir}${e.status === 'warning' ? ' wf-event-warning' : ''}${attnHit ? ' wf-attention-hit' : ''}" style="${posStyle}" onclick="toggleWorkflowDetail('${detailId}')">
           <span class="sequence-line"></span>
           <span class="sequence-label">
             <span class="sequence-title">${esc(msg.label)}</span>
@@ -463,6 +480,31 @@ function renderWorkflowGraph(data) {
 
   html += '</div></div>';
   return html;
+}
+
+function renderWorkflowAttention(attention) {
+  const status = attention.status || 'ok';
+  const age = attention.ageMs != null ? fmtDur(Number(attention.ageMs)) : '';
+  let html = `<div class="workflow-attention wf-${esc(status)}">
+    <div class="workflow-attention-main">
+      <span class="workflow-attention-status">${esc(status)}</span>
+      <strong>${esc(attention.title || 'Workflow attention')}</strong>
+      ${age ? `<span class="workflow-attention-age">${esc(age)}</span>` : ''}
+    </div>`;
+  if (attention.subtitle) html += `<div class="workflow-attention-sub">${esc(attention.subtitle)}</div>`;
+  const chips = [];
+  if (attention.runId) chips.push(`run ${String(attention.runId).slice(0, 8)}`);
+  if (attention.stepId) chips.push(`step ${String(attention.stepId).slice(0, 10)}`);
+  if (attention.childSessionKey) chips.push(`child ${shortText(attention.childSessionKey, 28)}`);
+  if (attention.childSessionId) chips.push(`sid ${String(attention.childSessionId).slice(0, 8)}`);
+  if (chips.length) html += `<div class="workflow-attention-chips">${chips.map(c => `<code>${esc(c)}</code>`).join('')}</div>`;
+  html += '</div>';
+  return html;
+}
+
+function shortText(text, max) {
+  text = String(text || '');
+  return text.length > max ? '...' + text.slice(-(max - 3)) : text;
 }
 
 function laneCenterPct(index, laneCount) {

@@ -33,6 +33,16 @@ console.log("\n=== Group 1: launchd plist generation ===");
   assert(!check.includes("__HOME__") && !check.includes("__NODE__"), "check output has no template placeholders");
 }
 
+console.log("\n=== Group 2: systemd user unit generation ===");
+{
+  const env = { ...process.env, HOME: tmpHome, NODE_BIN: nodeBin, OBS_SYSTEMD_SERVICE: join(tmpHome, "openclaw-observability.service") };
+  const generated = execFileSync("bash", [service, "generate-systemd"], { env, encoding: "utf-8" });
+  const check = execFileSync("bash", [service, "check-systemd"], { env, encoding: "utf-8" });
+  assert(generated.includes("Generated:"), "generate-systemd reports generated file");
+  assert(check.includes("Systemd unit OK"), "check-systemd accepts generated unit");
+  assert(!check.includes("__HOME__") && !check.includes("__NODE__"), "systemd check output has no template placeholders");
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 rmSync(tmpHome, { recursive: true, force: true });
 if (failed) {

@@ -36,29 +36,37 @@ The dashboard uses only Node standard-library modules.
 ## Quick Start
 
 ```bash
-git clone https://github.com/openclaw/openclaw-observability.git \
+git clone https://github.com/houyili/openclaw-observability.git \
   ~/.openclaw/extensions/observability-v2
 cd ~/.openclaw/extensions/observability-v2
 
-cp .env.example .env
-# Optional: set OBS_AUTH_TOKEN in .env before exposing the dashboard remotely.
-
-npm run start
+./scripts/install.sh
 ```
 
 Open [http://127.0.0.1:18902](http://127.0.0.1:18902).
 
-On macOS, install the launchd service:
+The installer checks Node.js, the OpenClaw CLI, local config, and the
+user-level service. It explains every permission-sensitive action before it
+runs it. For a preview:
 
 ```bash
-./scripts/service.sh generate-plist
-./scripts/service.sh check
-./scripts/service.sh install
-./scripts/service.sh start
+./scripts/install.sh --dry-run
 ```
 
-Linux and manual startup options are documented in
-[`docs/install/linux.md`](docs/install/linux.md).
+Foreground mode is still available:
+
+```bash
+cp .env.example .env
+npm run start
+```
+
+Uninstall and upgrade:
+
+```bash
+./scripts/upgrade.sh
+./scripts/uninstall.sh
+./scripts/doctor.sh
+```
 
 ## Configuration
 
@@ -137,6 +145,7 @@ More detail:
 - [`docs/workflow-graph.md`](docs/workflow-graph.md)
 - [`docs/install/macos.md`](docs/install/macos.md)
 - [`docs/install/linux.md`](docs/install/linux.md)
+- [`docs/compatibility.md`](docs/compatibility.md)
 - [`docs/release-checklist.md`](docs/release-checklist.md)
 
 ## License

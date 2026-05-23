@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { CONFIG } from "../config.ts";
 import { getEnvValue } from "../env.ts";
 import { getDb } from "./db.ts";
 import { getRunList } from "./steps-repo.ts";
@@ -65,6 +66,21 @@ export interface WorkflowValidation {
   checks: WorkflowValidationCheck[];
 }
 
+export interface WorkflowAttention {
+  status: "ok" | "idle" | "waiting" | "stuck" | "error";
+  title: string;
+  subtitle?: string;
+  laneId?: string;
+  eventId?: string;
+  stepId?: string;
+  runId?: string | null;
+  childSessionKey?: string | null;
+  childSessionId?: string | null;
+  sinceTs?: string | null;
+  ageMs?: number | null;
+  details?: Record<string, string | number | null>;
+}
+
 interface StepRow {
   step_id: string;
   session_key: string;
@@ -85,6 +101,8 @@ interface StepRow {
   input_preview: string | null;
   result_preview: string | null;
   error_text: string | null;
+  is_current: number | null;
+  is_stuck: number | null;
 }
 
 interface SpawnAccepted {
@@ -146,7 +164,18 @@ function parseMaybeJson(text: string | null): any | null {
 
 function extractSpawnAccepted(step: StepRow): SpawnAccepted | null {
   const json = parseMaybeJson(step.result_preview);
-  if (!json || typeof json !== "object") return null;
+  const text = step.result_preview || "";
+  if (!json || typeof json !== "object") {
+    const childSessionKey = text.match(/"childSessionKey"\s*:\s*"([^"]+)"/)?.[1] || null;
+    const runId = text.match(/"runId"\s*:\s*"([^"]+)"/)?.[1] || null;
+    if (!childSessionKey && !runId) return null;
+    return {
+      childSessionKey,
+      runId,
+      taskName: text.match(/"taskName"\s*:\s*"([^"]+)"/)?.[1] || null,
+      mode: text.match(/"mode"\s*:\s*"([^"]+)"/)?.[1] || null,
+    };
+  }
   const childSessionKey = typeof json.childSessionKey === "string" ? json.childSessionKey : null;
   const runId = typeof json.runId === "string" ? json.runId : null;
   if (!childSessionKey && !runId) return null;
@@ -404,6 +433,136 @@ function validateWorkflowGraph(params: {
   return { status: validationStatus(checks), checks };
 }
 
+function computeWorkflowAttention(params: {
+  sessionId?: string | null;
+  parentKey: string;
+  activeRunId: string | null;
+  events: WorkflowEvent[];
+  parentSteps: StepRow[];
+  childStepMap: Map<string, StepRow[]>;
+  spawnAccepts: Array<{ requested: WorkflowEvent; accepted?: WorkflowEvent; acceptedData: SpawnAccepted; step: StepRow }>;
+}): WorkflowAttention {
+  const db = getDb();
+  const now = Date.now();
+  const session = params.sessionId
+    ? db.prepare(`
+        SELECT session_id, diag_state, current_op, blocker, last_block_ts, updated_at
+        FROM sessions WHERE session_key = ? AND session_id = ? LIMIT 1
+      `).get(params.parentKey, params.sessionId) as any
+    : db.prepare(`
+        SELECT session_id, diag_state, current_op, blocker, last_block_ts, updated_at
+        FROM sessions WHERE session_key = ? ORDER BY updated_at DESC LIMIT 1
+      `).get(params.parentKey) as any;
+
+  const allRows = [...params.parentSteps, ...params.childStepMap.values()].flat();
+  const current = allRows
+    .filter(s => s.is_current)
+    .sort((a, b) => b.ts_epoch_ms - a.ts_epoch_ms)[0];
+  if (current) {
+    const ageMs = now - current.ts_epoch_ms;
+    const dynamicStuck = ageMs > CONFIG.STUCK_THRESHOLD_MS || !!current.is_stuck;
+    return {
+      status: dynamicStuck ? "stuck" : "waiting",
+      title: dynamicStuck ? `Stuck on ${current.tool_name || current.node_type}` : `Running ${current.tool_name || current.node_type}`,
+      subtitle: current.input_preview || current.result_preview || undefined,
+      laneId: current.session_key === params.parentKey ? "parent" : `child:${current.session_key}`,
+      stepId: current.step_id,
+      runId: current.run_id,
+      sinceTs: current.ts,
+      ageMs,
+      details: {
+        tool_name: current.tool_name,
+        node_type: current.node_type,
+        status: current.status,
+      },
+    };
+  }
+
+  const latestYield = [...params.events].reverse().find(e => e.type === "sessions_yield");
+  const latestResume = [...params.events].reverse().find(e => e.type === "parent_resumed");
+  if (latestYield && (!latestResume || latestResume.tsEpochMs < latestYield.tsEpochMs)) {
+    const acceptedChildren = params.spawnAccepts
+      .filter(s => s.acceptedData.childSessionKey)
+      .map(s => baseKey(s.acceptedData.childSessionKey as string));
+    const children = acceptedChildren.length > 0
+      ? db.prepare(`
+          SELECT session_key, session_id, diag_state, current_op, blocker, updated_at
+          FROM sessions
+          WHERE session_key IN (${acceptedChildren.map(() => "?").join(",")})
+          ORDER BY updated_at DESC
+        `).all(...acceptedChildren) as any[]
+      : (params.sessionId
+          ? db.prepare(`
+              SELECT session_key, session_id, diag_state, current_op, blocker, updated_at
+              FROM sessions WHERE parent_session_id = ? ORDER BY updated_at DESC
+            `).all(params.sessionId) as any[]
+          : []);
+    const child = children[0] || null;
+    const ageMs = now - latestYield.tsEpochMs;
+    const childState = child ? `${child.diag_state || "unknown"}${child.current_op ? ` / ${child.current_op}` : ""}` : "not visible";
+    return {
+      status: ageMs > CONFIG.STUCK_THRESHOLD_MS ? "stuck" : "waiting",
+      title: child ? "Parent yielded; waiting for child merge" : "Parent yielded; child not visible",
+      subtitle: child ? `child ${shortKey(child.session_key)} is ${childState}; no parent resume observed` : "no child session is linked or visible",
+      laneId: child ? `child:${child.session_key}` : "runtime",
+      eventId: latestYield.id,
+      stepId: typeof latestYield.provenance?.step_id === "string" ? latestYield.provenance.step_id : undefined,
+      runId: params.activeRunId,
+      childSessionKey: child?.session_key || acceptedChildren[0] || null,
+      childSessionId: child?.session_id || null,
+      sinceTs: latestYield.ts,
+      ageMs,
+      details: {
+        yielded_event: latestYield.id,
+        child_state: childState,
+        child_updated_at: child?.updated_at || null,
+      },
+    };
+  }
+
+  if (session?.blocker && session?.last_block_ts) {
+    return {
+      status: "stuck",
+      title: `Stuck on ${session.blocker}`,
+      subtitle: session.current_op ? `current op: ${session.current_op}` : undefined,
+      laneId: "parent",
+      runId: params.activeRunId,
+      sinceTs: new Date(session.last_block_ts).toISOString(),
+      ageMs: now - session.last_block_ts,
+      details: {
+        diag_state: session.diag_state,
+        blocker: session.blocker,
+        current_op: session.current_op,
+      },
+    };
+  }
+
+  const latestError = [...params.events].reverse().find(e => e.status === "error");
+  if (latestError) {
+    return {
+      status: "error",
+      title: `Latest visible error: ${latestError.title}`,
+      subtitle: latestError.subtitle,
+      laneId: latestError.laneId,
+      eventId: latestError.id,
+      stepId: typeof latestError.provenance?.step_id === "string" ? latestError.provenance.step_id : undefined,
+      runId: latestError.provenance?.run_id ? String(latestError.provenance.run_id) : params.activeRunId,
+      sinceTs: latestError.ts,
+      ageMs: latestError.tsEpochMs ? now - latestError.tsEpochMs : null,
+    };
+  }
+
+  return {
+    status: session?.diag_state === "idle" ? "idle" : "ok",
+    title: session?.diag_state === "idle" ? "No active blocker" : "Workflow data looks healthy",
+    subtitle: session?.current_op ? `last op: ${session.current_op}` : undefined,
+    laneId: "parent",
+    runId: params.activeRunId,
+    sinceTs: session?.updated_at ? new Date(session.updated_at).toISOString() : null,
+    ageMs: session?.updated_at ? now - session.updated_at : null,
+  };
+}
+
 export function getWorkflowGraph(sessionKey: string, runId?: string, sessionId?: string | null): {
   sessionKey: string;
   sessionId: string | null;
@@ -413,6 +572,7 @@ export function getWorkflowGraph(sessionKey: string, runId?: string, sessionId?:
   edges: WorkflowEdge[];
   diagnostics: WorkflowDiagnostic[];
   validation: WorkflowValidation;
+  attention: WorkflowAttention;
   runs: any[];
 } {
   const db = getDb();
@@ -457,6 +617,15 @@ export function getWorkflowGraph(sessionKey: string, runId?: string, sessionId?:
       childStepMap: new Map(),
       spawnAccepts: [],
     });
+    const attention = computeWorkflowAttention({
+      sessionId,
+      parentKey,
+      activeRunId,
+      events,
+      parentSteps,
+      childStepMap: new Map(),
+      spawnAccepts: [],
+    });
     return {
       sessionKey: parentKey,
       sessionId: sessionId || null,
@@ -466,6 +635,7 @@ export function getWorkflowGraph(sessionKey: string, runId?: string, sessionId?:
       edges,
       diagnostics,
       validation,
+      attention,
       runs,
     };
   }
@@ -774,6 +944,15 @@ export function getWorkflowGraph(sessionKey: string, runId?: string, sessionId?:
     childStepMap,
     spawnAccepts,
   });
+  const attention = computeWorkflowAttention({
+    sessionId,
+    parentKey,
+    activeRunId,
+    events,
+    parentSteps,
+    childStepMap,
+    spawnAccepts,
+  });
   for (const check of validation.checks) {
     if (check.status === "ok") continue;
     diagnostics.push({
@@ -794,6 +973,7 @@ export function getWorkflowGraph(sessionKey: string, runId?: string, sessionId?:
     edges,
     diagnostics,
     validation,
+    attention,
     runs,
   };
 }

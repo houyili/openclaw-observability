@@ -7,12 +7,12 @@
   "main": "src/index.ts",
   "repository": {
     "type": "git",
-    "url": "https://github.com/openclaw/openclaw-observability.git"
+    "url": "https://github.com/houyili/openclaw-observability.git"
   },
   "bugs": {
-    "url": "https://github.com/openclaw/openclaw-observability/issues"
+    "url": "https://github.com/houyili/openclaw-observability/issues"
   },
-  "homepage": "https://github.com/openclaw/openclaw-observability#readme",
+  "homepage": "https://github.com/houyili/openclaw-observability#readme",
   "keywords": [
     "openclaw",
     "observability",
@@ -36,10 +36,11 @@
     "start": "node --experimental-sqlite --experimental-strip-types --no-warnings src/index.ts",
     "dev": "node --experimental-sqlite --experimental-strip-types --watch --no-warnings src/index.ts",
     "test": "./tests/run-all.sh",
-    "test:hermetic": "TEST_FILTER='unit invariants fixture auth-stale context-length cli-commands frontend-detail workflow-projection workflow-frontend session-id-scope env-config service-self-check watcher-rehome token-backfill parent-child' ./tests/run-all.sh",
+    "test:hermetic": "TEST_FILTER='unit invariants fixture transcript-consistency-e2e auth-stale context-length cli-commands frontend-detail workflow-projection workflow-frontend session-id-scope env-config service-self-check installer-scripts watcher-rehome token-backfill parent-child' ./tests/run-all.sh",
     "test:unit": "node --experimental-sqlite --experimental-strip-types --no-warnings tests/run-tests.ts",
     "test:invariants": "node --experimental-sqlite --experimental-strip-types --no-warnings tests/parser-invariants.test.ts",
     "test:fixture": "node --experimental-sqlite --experimental-strip-types --no-warnings tests/fixture-ingest.test.ts",
+    "test:transcript-consistency-e2e": "node --experimental-sqlite --experimental-strip-types --no-warnings tests/transcript-consistency-e2e.test.ts",
     "test:auth-stale": "node --experimental-sqlite --experimental-strip-types --no-warnings tests/auth-stale.test.ts",
     "test:context-length": "node --experimental-sqlite --experimental-strip-types --no-warnings tests/context-length.test.ts",
     "test:cli-commands": "node --experimental-sqlite --experimental-strip-types --no-warnings tests/cli-commands.test.ts",
@@ -49,6 +50,7 @@
     "test:session-id-scope": "node --experimental-sqlite --experimental-strip-types --no-warnings tests/session-id-scope.test.ts",
     "test:env-config": "node --experimental-sqlite --experimental-strip-types --no-warnings tests/env-config.test.ts",
     "test:service-self-check": "node --experimental-sqlite --experimental-strip-types --no-warnings tests/service-self-check.test.ts",
+    "test:installer-scripts": "node --experimental-sqlite --experimental-strip-types --no-warnings tests/installer-scripts.test.ts",
     "test:watcher-rehome": "node --experimental-sqlite --experimental-strip-types --no-warnings tests/watcher-rehome.test.ts",
     "test:token-backfill": "node --experimental-sqlite --experimental-strip-types --no-warnings tests/token-backfill.test.ts",
     "test:parent-child": "node --experimental-sqlite --experimental-strip-types --no-warnings tests/parent-child.test.ts",

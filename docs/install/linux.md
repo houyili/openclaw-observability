@@ -15,7 +15,21 @@ Open [http://127.0.0.1:18902](http://127.0.0.1:18902).
 
 ## systemd User Service
 
-Create `~/.config/systemd/user/openclaw-observability.service`:
+Recommended:
+
+```bash
+./scripts/install.sh
+./scripts/doctor.sh
+```
+
+The installer checks Node.js 22+, the OpenClaw CLI, `.env`, and the user
+systemd path. It explains that it writes only to:
+
+- `~/.openclaw/extensions/observability-v2/.env`
+- `~/.config/systemd/user/openclaw-observability.service`
+- `~/.openclaw/logs/observability-v2/`
+
+The generated user unit is equivalent to:
 
 ```ini
 [Unit]
@@ -41,6 +55,36 @@ systemctl --user daemon-reload
 systemctl --user enable --now openclaw-observability
 systemctl --user status openclaw-observability
 ```
+
+Lower-level service commands:
+
+```bash
+./scripts/service.sh generate-systemd
+./scripts/service.sh check-systemd
+./scripts/service.sh install
+./scripts/service.sh restart
+./scripts/service.sh logs
+./scripts/service.sh uninstall
+```
+
+## Upgrade
+
+```bash
+./scripts/upgrade.sh
+```
+
+The upgrade helper requires a clean standalone git checkout, runs
+`git pull --ff-only`, regenerates the user unit, restarts the service, and
+checks `/healthz`.
+
+## Uninstall
+
+```bash
+./scripts/uninstall.sh
+```
+
+The default removes only the systemd user service. It asks before deleting
+`.env`, logs, the SQLite DB, or the git checkout.
 
 ## Optional ngrok Token
 

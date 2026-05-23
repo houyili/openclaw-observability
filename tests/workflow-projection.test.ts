@@ -183,6 +183,7 @@ waiting_children: none
   assert(graph.validation.status === "ok", "workflow graph self-validation passes");
   assert(graph.validation.checks.some(c => c.id === "provenance.step_id" && c.status === "ok"), "self-validation checks step provenance");
   assert(graph.validation.checks.some(c => c.id === "scope.run_id" && c.status === "ok"), "self-validation checks run scope");
+  assert(["idle", "ok"].includes(graph.attention.status), "attention summary reports no active blocker after completed workflow");
 
   const accepted = graph.events.find(e => e.type === "sessions_spawn_accepted");
   assert(accepted?.provenance.childSessionKey === childKey, "accepted event includes childSessionKey provenance");
@@ -244,6 +245,8 @@ db.prepare("DELETE FROM steps WHERE session_key = ?").run(childKey);
   assert(graph.validation.status === "warning", "self-validation warns when accepted child has no visible steps");
   assert(graph.validation.checks.some(c => c.id === "spawn.child_steps" && c.status === "warning"), "self-validation identifies missing child steps");
   assert(graph.diagnostics.some(d => d.type === "validation_spawn_child_steps"), "validation warning is surfaced as diagnostic");
+  assert(["waiting", "stuck"].includes(graph.attention.status), "attention marks parent yielded without visible child return as waiting/stuck");
+  assert(graph.attention.title.includes("Parent yielded"), "attention explains parent is waiting after yield");
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

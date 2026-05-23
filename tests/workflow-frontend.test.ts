@@ -122,6 +122,17 @@ function sampleWorkflow() {
       { id: "edge-2", from: "e3", to: "e5", type: "taskflow", label: "gap" },
     ],
     diagnostics: [{ id: "d1", severity: "warning", type: "taskflow_childruns_empty", message: "Accepted child is missing from managed workflow child references", eventId: "e5" }],
+    attention: {
+      status: "stuck",
+      title: "Parent yielded; waiting for child merge",
+      subtitle: "child abc is idle / exec; no parent resume observed",
+      eventId: "e4",
+      stepId: "child-final",
+      runId: "run-12345678",
+      childSessionKey: "abc",
+      childSessionId: "sid-child",
+      ageMs: 120000,
+    },
     validation: {
       status: "ok",
       checks: [
@@ -169,6 +180,9 @@ console.log("\n=== Group 1: renderWorkflowGraph ===");
   assert(html.includes("ctx 12K"), "renders context length metadata");
   assert(html.includes("1.2s"), "renders call duration metadata");
   assert(html.includes("workflow-validation wf-ok"), "renders workflow data validation status");
+  assert(html.includes("workflow-attention wf-stuck"), "renders workflow attention summary");
+  assert(html.includes("Parent yielded; waiting for child merge"), "renders stuck location title");
+  assert(html.includes("wf-attention-hit"), "highlights the attention event");
   assert(html.includes("taskflow_childruns_empty"), "renders diagnostics");
   assert(html.includes("childSessionKey"), "detail provenance includes childSessionKey");
   assert(!/mermaid/i.test(html), "does not require Mermaid markup");
