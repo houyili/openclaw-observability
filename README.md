@@ -17,6 +17,8 @@ backend, and no LLM summarization in the observability path.
   lineage, channel, model, token source, and diagnostic state.
 - Workflow Graph: deterministic swimlane projection across user, parent
   session, OpenClaw runtime, child sessions, and optional workflow state.
+- Prompt Check: deterministic workflow-rule projection that links transcript
+  evidence and optional hook reminder events to actionable diagnostics.
 - Workflow Trace: per-run waterfall from transcript steps.
 - Context Length: coarse bucket breakdown and per-turn timeline derived
   from assistant `usage` fields.
@@ -89,6 +91,7 @@ live in `src/config.ts`.
 
 ```bash
 npm run test:hermetic
+npm run test:open-source-sanitization
 npm run test:integrity
 npm run test:live-e2e
 npm run test:replay
@@ -117,6 +120,7 @@ and [`docs/security.md`](docs/security.md).
 curl http://127.0.0.1:18902/healthz
 curl http://127.0.0.1:18902/api/summary
 curl http://127.0.0.1:18902/api/sessions
+curl http://127.0.0.1:18902/api/sessions/ENCODED_KEY/prompt-check
 curl http://127.0.0.1:18902/api/sessions/ENCODED_KEY/workflow
 curl http://127.0.0.1:18902/api/sessions/ENCODED_KEY/trace
 curl http://127.0.0.1:18902/api/sessions/ENCODED_KEY/context
@@ -138,15 +142,20 @@ Every workflow event includes provenance such as `step_id`, `run_id`,
 - Workflow Graph labels are deterministic. Optional managed workflow
   adapters may add child-binding diagnostics, but no LLM-generated summary
   is used to create graph edges.
+- Prompt Check rules are generic OpenClaw workflow checks loaded from
+  `config/prompt-rules.json`. They do not depend on a private agent or
+  workspace prompt.
 
 More detail:
 
 - [`docs/architecture.md`](docs/architecture.md)
 - [`docs/workflow-graph.md`](docs/workflow-graph.md)
+- [`docs/prompt-check.md`](docs/prompt-check.md)
 - [`docs/install/macos.md`](docs/install/macos.md)
 - [`docs/install/linux.md`](docs/install/linux.md)
 - [`docs/compatibility.md`](docs/compatibility.md)
 - [`docs/release-checklist.md`](docs/release-checklist.md)
+- [`CHANGELOG.md`](CHANGELOG.md)
 
 ## License
 

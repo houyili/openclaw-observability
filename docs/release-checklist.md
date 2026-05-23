@@ -6,6 +6,7 @@ Use this before publishing a public release.
 
 ```bash
 npm run test:hermetic
+npm run test:open-source-sanitization
 bash -n scripts/*.sh
 python3 -m py_compile scripts/install_ngrok.py
 git diff --check
@@ -19,7 +20,7 @@ npm run test:perf
 ## Open Source Audit
 
 ```bash
-rg -n "TO""DO|FIX""ME|TB""D" README.md DATA_ACCESS.md docs scripts src tests package.json
+rg -n "TO""DO|FIX""ME|TB""D" README.md DATA_ACCESS.md CHANGELOG.md docs scripts src tests package.json config
 rg -n "byte""dance|agents_design""_doc|Documents/""group|ngrok.*token|sk-|sec""ret|pass""word" .
 rg -n "openclaw\\.json|research""er|fei""shu|task""flow|Task""Flow" .
 git log --all --format=fuller
@@ -50,9 +51,18 @@ Expected matches:
 git clone <repo> /tmp/openclaw-observability-smoke
 cd /tmp/openclaw-observability-smoke
 npm run test:hermetic
+npm run test:open-source-sanitization
 ./scripts/install.sh --dry-run --yes --no-start
-npm run start
+```
+
+Optional foreground health smoke, only when port `18902` is available:
+
+```bash
+npm run start &
+pid=$!
+sleep 2
 curl http://127.0.0.1:18902/healthz
+kill "$pid"
 ```
 
 ## Extract From A Monorepo
@@ -73,6 +83,7 @@ minimal message rewrite in the extracted clone before pushing.
 ## Tag
 
 ```bash
-git tag vX.Y.Z
-git push origin main --tags
+git tag -a vX.Y.Z -m "vX.Y.Z"
+git push origin main
+git push origin vX.Y.Z
 ```

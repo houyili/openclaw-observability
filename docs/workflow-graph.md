@@ -34,7 +34,7 @@ Response shape:
 
 ## Event Types
 
-The public event type names are stable for v0.1:
+The public event type names are stable for v0.1.1 and later:
 
 - `user_message`
 - `skill_or_source_step`
