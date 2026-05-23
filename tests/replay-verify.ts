@@ -30,6 +30,7 @@ import { join, basename } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { CONFIG } from "../src/config.ts";
 import { parseTranscript, type TranscriptEntry } from "../src/ingest/transcript-parser.ts";
+import { isCanonicalTranscriptFile } from "../src/ingest/transcript-files.ts";
 
 // Any file the OS reports as written within this many ms of "now" is
 // considered "actively being written" — drift on these is treated as a
@@ -49,8 +50,7 @@ function findTranscripts(): string[] {
     const sessionsDir = join(agentsDir, agent.name, "sessions");
     if (!existsSync(sessionsDir)) continue;
     for (const f of readdirSync(sessionsDir)) {
-      if (!f.endsWith(".jsonl")) continue;
-      if (f.includes(".acp-stream")) continue;
+      if (!isCanonicalTranscriptFile(f)) continue;
       files.push(join(sessionsDir, f));
     }
   }

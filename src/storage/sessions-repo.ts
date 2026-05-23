@@ -315,7 +315,10 @@ export function recomputeAllSessionOps(onlyBaseKeys?: Set<string>): void {
 
   for (const baseKey of baseKeys) {
     const lastStep = lastStepStmt.get(baseKey) as any;
-    if (!lastStep) continue;
+    if (!lastStep) {
+      updateStmt.run(null, null, null, "idle", baseKey, baseKey + ":run:%");
+      continue;
+    }
 
     let currentOp = lastStep.tool_name || lastStep.node_type || null;
     if (lastStep.node_type === "REPLY" || lastStep.node_type === "MODEL_THINK") {

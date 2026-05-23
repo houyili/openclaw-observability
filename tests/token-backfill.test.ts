@@ -122,6 +122,9 @@ console.log("\n=== Group 1: Backfill tokens when session has 0 ===");
   assert(sess.source === "transcript+auth",
     "source flipped to transcript+auth",
     `got ${sess.source}`);
+  assert(sess.token_source === "transcript-backfill",
+    "token_source marks transcript backfill",
+    `got ${sess.token_source}`);
 
   // call counts should also be correct
   assert(sess.llm_call_count === 3,
@@ -162,6 +165,9 @@ console.log("\n=== Group 2: Do NOT override non-zero auth-poller tokens ===");
   assert(sess.context_tokens === 100000,
     "context_tokens preserved from auth-poller (100000)",
     `got ${sess.context_tokens}`);
+  assert((sess.token_source || "official") === "official",
+    "token_source remains official when auth tokens are non-zero",
+    `got ${sess.token_source}`);
 }
 
 

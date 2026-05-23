@@ -12,6 +12,10 @@
 #                     (cli-commands.test.ts) — hermetic
 #   frontend-detail — Round 6 follow-up: stacked trace+context detail view
 #                     (frontend-detail-view.test.ts) — hermetic
+#   workflow-projection — deterministic Workflow Graph backend projection
+#                     (workflow-projection.test.ts) — hermetic
+#   workflow-frontend — native HTML/CSS Workflow Graph rendering
+#                     (workflow-frontend.test.ts) — hermetic
 #   watcher-rehome  — transcript-watcher sessionIdToKeyMap TTL refresh +
 #                     raw-UUID re-homing (watcher-rehome.test.ts) — hermetic
 #   token-backfill  — recomputeSessionCounts token backfill from steps
@@ -27,7 +31,7 @@
 #   perf            — wall-clock + CPU budgets for hot paths (perf-bench.ts)
 #
 # Hermetic suites (no live obs-v2 service or live transcripts needed):
-#   unit, invariants, fixture, auth-stale, context-length, cli-commands, frontend-detail, watcher-rehome, token-backfill, parent-child
+#   unit, invariants, fixture, auth-stale, context-length, cli-commands, frontend-detail, workflow-projection, workflow-frontend, watcher-rehome, token-backfill, parent-child
 #
 # Live suites (need a running obs-v2 + ~/.openclaw/agents/<agent>/sessions/):
 #   integrity, live-e2e, replay, cross-check, perf
@@ -45,7 +49,7 @@ NODE_BIN="${NODE_BIN:-$HOME/.local/bin/node}"
 [ -x "$NODE_BIN" ] || NODE_BIN="node"
 NODE_FLAGS="--experimental-sqlite --experimental-strip-types --no-warnings"
 
-FILTER="${TEST_FILTER:-unit invariants fixture auth-stale context-length cli-commands frontend-detail watcher-rehome token-backfill parent-child integrity live-e2e replay cross-check perf}"
+FILTER="${TEST_FILTER:-unit invariants fixture auth-stale context-length cli-commands frontend-detail workflow-projection workflow-frontend watcher-rehome token-backfill parent-child integrity live-e2e replay cross-check perf}"
 
 total_fail=0
 run_suite() {
@@ -73,6 +77,8 @@ run_suite "auth-stale"      "tests/auth-stale.test.ts"
 run_suite "context-length"  "tests/context-length.test.ts"
 run_suite "cli-commands"    "tests/cli-commands.test.ts"
 run_suite "frontend-detail" "tests/frontend-detail-view.test.ts"
+run_suite "workflow-projection" "tests/workflow-projection.test.ts"
+run_suite "workflow-frontend" "tests/workflow-frontend.test.ts"
 run_suite "watcher-rehome"  "tests/watcher-rehome.test.ts"
 run_suite "token-backfill"  "tests/token-backfill.test.ts"
 run_suite "parent-child"   "tests/parent-child.test.ts"

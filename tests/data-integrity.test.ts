@@ -60,6 +60,16 @@ if (!existsSync(CONFIG.DB_PATH)) {
   process.exit(0);
 }
 
+// Use the current code's dynamic stale/blocker logic before asserting stored
+// session state. This keeps the live-only suite from depending on whether the
+// long-running service has already restarted onto this revision.
+{
+  const { recomputeAllSessionOps } = await import("../src/storage/sessions-repo.ts");
+  const { closeDb } = await import("../src/storage/db.ts");
+  recomputeAllSessionOps();
+  closeDb();
+}
+
 const db = new DatabaseSync(CONFIG.DB_PATH, { readOnly: true });
 
 // ─── A. Whole-table sanity ──────────────────────────────────────
@@ -404,6 +414,42 @@ console.log("\n=== F-pre. updated_at vs latest step ts drift ===");
       ? `${drift.length} stale sessions, worst: ${drift[0].session_key} (drift ${Math.round(drift[0].drift_ms / 60000)}m)`
       : undefined,
   );
+}
+
+// ─── F-stale. Current op/blocker freshness ─────────────────────
+console.log("\n=== F-stale. current processing/blocker freshness ===");
+{
+  const staleProcessing = db.prepare(`
+    SELECT s.session_key, s.diag_state, st.status, st.is_current
+    FROM sessions s
+    JOIN steps st ON (st.session_key = s.session_key OR s.session_key LIKE st.session_key || ':run:%')
+      AND st.ts_epoch_ms = (
+        SELECT MAX(ts_epoch_ms) FROM steps latest
+        WHERE latest.session_key = s.session_key OR s.session_key LIKE latest.session_key || ':run:%'
+      )
+    WHERE s.diag_state = 'processing'
+      AND COALESCE(st.is_current, 0) = 0
+    LIMIT 10
+  `).all() as any[];
+  assert(staleProcessing.length === 0,
+    "F-stale.1: no processing sessions whose latest step is completed",
+    staleProcessing.length > 0 ? `${staleProcessing.length} stale processing sessions` : undefined);
+
+  const blockersWithoutCurrentStuck = db.prepare(`
+    SELECT s.session_key, s.blocker
+    FROM sessions s
+    WHERE s.blocker IS NOT NULL
+      AND NOT EXISTS (
+        SELECT 1 FROM steps st
+        WHERE (st.session_key = s.session_key OR s.session_key LIKE st.session_key || ':run:%')
+          AND st.is_current = 1
+          AND st.is_stuck = 1
+      )
+    LIMIT 10
+  `).all() as any[];
+  assert(blockersWithoutCurrentStuck.length === 0,
+    "F-stale.2: no blocker without a current stuck step",
+    blockersWithoutCurrentStuck.length > 0 ? `${blockersWithoutCurrentStuck.length} stale blockers` : undefined);
 }
 
 // ─── F. Round 7: Parent-child relationship integrity ───────────

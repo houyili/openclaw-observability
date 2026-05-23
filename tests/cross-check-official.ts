@@ -85,13 +85,13 @@ function fetchOfficial(): OfficialSession[] {
 // `WHERE session_key = ?` with LIMIT 1 returns the wrong row. We pin by
 // (session_key, session_id) which matches the sessions PRIMARY KEY.
 
-interface ObsRow { input: number; output: number; total: number; source: string; model: string }
+interface ObsRow { input: number; output: number; total: number; source: string; tokenSource: string; model: string }
 
 function readObsDb(pairs: Array<{ key: string; sessionId: string }>): Map<string, ObsRow> {
   const db = new DatabaseSync(CONFIG.DB_PATH, { readOnly: true });
   const map = new Map<string, ObsRow>();
   const stmt = db.prepare(
-    "SELECT input_tokens, output_tokens, total_tokens, source, model FROM sessions WHERE session_key = ? AND session_id = ? LIMIT 1",
+    "SELECT input_tokens, output_tokens, total_tokens, source, token_source, model FROM sessions WHERE session_key = ? AND session_id = ? LIMIT 1",
   );
   for (const { key, sessionId } of pairs) {
     const row = stmt.get(key, sessionId) as any;
@@ -101,6 +101,7 @@ function readObsDb(pairs: Array<{ key: string; sessionId: string }>): Map<string
         output: row.output_tokens || 0,
         total: row.total_tokens || 0,
         source: row.source || "unknown",
+        tokenSource: row.token_source || "official",
         model: row.model || "",
       });
     }
@@ -124,6 +125,7 @@ interface CompareOutcome {
   official: OfficialSession[];
   obsData: Map<string, ObsRow>;
   mismatches: Mismatch[];
+  allowedBackfills: Mismatch[];
   missing: Array<{ key: string; sessionId: string }>;
 }
 
@@ -131,13 +133,14 @@ function compareOnce(): CompareOutcome {
   const official = fetchOfficial();
   console.log(`[cross-check] official returned ${official.length} sessions`);
   if (official.length === 0) {
-    return { official, obsData: new Map(), mismatches: [], missing: [] };
+    return { official, obsData: new Map(), mismatches: [], allowedBackfills: [], missing: [] };
   }
 
   const obsData = readObsDb(official.map(s => ({ key: s.key, sessionId: s.sessionId })));
   console.log(`[cross-check] obs.db covered ${obsData.size}/${official.length} of them (composite key)`);
 
   const mismatches: Mismatch[] = [];
+  const allowedBackfills: Mismatch[] = [];
   const missing: Array<{ key: string; sessionId: string }> = [];
 
   for (const off of official) {
@@ -150,20 +153,26 @@ function compareOnce(): CompareOutcome {
     ];
     for (const [field, o, a] of fields) {
       const diff = Math.abs(o - a);
-      if (diff > TOLERANCE) mismatches.push({ key: off.key, sessionId: off.sessionId, field, official: o, obs: a, diff });
+      if (diff <= TOLERANCE) continue;
+      const mismatch = { key: off.key, sessionId: off.sessionId, field, official: o, obs: a, diff };
+      if (o === 0 && a > 0 && obs.tokenSource === "transcript-backfill") {
+        allowedBackfills.push(mismatch);
+      } else {
+        mismatches.push(mismatch);
+      }
     }
   }
-  return { official, obsData, mismatches, missing };
+  return { official, obsData, mismatches, allowedBackfills, missing };
 }
 
-let { official, obsData, mismatches, missing } = compareOnce();
+let { official, obsData, mismatches, allowedBackfills, missing } = compareOnce();
 
 // Retry once if the first pass failed — auth-poller runs every 30 s, so a
 // brand-new session can legitimately be in obs.db a few seconds stale.
 if ((mismatches.length > 0 || missing.length > 0) && RETRY_WAIT_SEC > 0 && official.length > 0) {
   console.log(`\n[cross-check] first-pass drift detected; sleeping ${RETRY_WAIT_SEC}s and retrying to rule out auth-poller lag ...`);
   await sleep(RETRY_WAIT_SEC * 1000);
-  ({ official, obsData, mismatches, missing } = compareOnce());
+  ({ official, obsData, mismatches, allowedBackfills, missing } = compareOnce());
 }
 
 if (official.length === 0) {
@@ -178,10 +187,19 @@ console.log(`  official sessions:     ${official.length}`);
 console.log(`  covered in obs.db:     ${obsData.size}`);
 console.log(`  missing in obs.db:     ${missing.length}`);
 console.log(`  token field mismatches: ${mismatches.length}  (tolerance ±${TOLERANCE})`);
+console.log(`  allowed backfills:     ${allowedBackfills.length}  (official zero, transcript-backfill)`);
 
 if (missing.length > 0) {
   console.log("\n  missing (first 5):");
   for (const m of missing.slice(0, 5)) console.log(`    ${m.key}  sid=${m.sessionId.slice(0, 8)}`);
+}
+
+if (allowedBackfills.length > 0) {
+  console.log("\n  allowed transcript backfills (first 5):");
+  for (const m of allowedBackfills.slice(0, 5)) {
+    console.log(`    ${m.field}: official=0 obs=${m.obs} source=transcript-backfill`);
+    console.log(`      ${m.key}  sid=${m.sessionId.slice(0, 8)}`);
+  }
 }
 
 if (mismatches.length > 0) {

@@ -46,6 +46,7 @@ process.env.OPENCLAW_HOME = tmpHome;
 const { parseTranscript } = await import("../src/ingest/transcript-parser.ts");
 const { upsertSteps } = await import("../src/storage/steps-repo.ts");
 const { getDb, closeDb } = await import("../src/storage/db.ts");
+const { isCanonicalTranscriptFile } = await import("../src/ingest/transcript-files.ts");
 const watcher = await import("../src/ingest/transcript-watcher.ts");
 const { _resetSessionIdMapForTest } = watcher;
 
@@ -94,6 +95,15 @@ console.log("\n=== Group 1: Raw UUID detection regex ===");
 // ═══════════════════════════════════════════════════════════════
 
 {
+  assert(isCanonicalTranscriptFile("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.jsonl") === true,
+    "canonical transcript file accepted");
+  assert(isCanonicalTranscriptFile("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.acp-stream.jsonl") === false,
+    "ACP stream sidecar skipped");
+  assert(isCanonicalTranscriptFile("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.checkpoint.1.jsonl") === false,
+    "checkpoint sidecar skipped");
+  assert(isCanonicalTranscriptFile("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.trajectory.jsonl") === false,
+    "trajectory sidecar skipped");
+
   // The regex: /^[0-9a-f]{8}-[0-9a-f]{4}-/ without ":"
   const isRawUuid = (key: string) =>
     /^[0-9a-f]{8}-[0-9a-f]{4}-/.test(key) && !key.includes(":");
