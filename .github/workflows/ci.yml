@@ -6,18 +6,37 @@ on:
   pull_request:
     branches: [main]
 
+# R8 hardening (Round 8, 2026-05-24):
+#   - timeout-minutes bounds the job so a hung step does not eat
+#     an hour of Actions budget.
+#   - concurrency cancels older in-flight runs on the same ref so
+#     a fast-follow push does not queue up redundant work.
+#   - actions/checkout@v4 stays the canonical action; fetch-depth: 1
+#     keeps the network round-trip small and reduces exposure to the
+#     transient checkout failures observed during the v0.1.1 push
+#     (see agents_design_doc/opensource/08_..._risk_register.md R8).
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   hermetic:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    concurrency:
+      group: ci-${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: true
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - run: bash -n scripts/*.sh
-      - run: python3 -m py_compile scripts/install_ngrok.py
-      - run: npm run test:hermetic
-      - run: ./scripts/install.sh --dry-run --yes --no-start
+      - name: Shell syntax check
+        run: bash -n scripts/*.sh
+      - name: Python syntax check
+        run: python3 -m py_compile scripts/install_ngrok.py
+      - name: Hermetic test suite
+        run: npm run test:hermetic
+      - name: Installer dry-run
+        run: ./scripts/install.sh --dry-run --yes --no-start
