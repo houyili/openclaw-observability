@@ -1,14 +1,42 @@
 {
-  "name": "openclaw-observability-v2",
+  "name": "openclaw-observability",
   "version": "0.1.0",
   "description": "OpenClaw observability dashboard — transcript-based session monitoring",
+  "license": "Apache-2.0",
   "type": "module",
   "main": "src/index.ts",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/openclaw/openclaw-observability.git"
+  },
+  "bugs": {
+    "url": "https://github.com/openclaw/openclaw-observability/issues"
+  },
+  "homepage": "https://github.com/openclaw/openclaw-observability#readme",
+  "keywords": [
+    "openclaw",
+    "observability",
+    "agent",
+    "transcripts",
+    "sqlite",
+    "dashboard"
+  ],
+  "files": [
+    "src",
+    "scripts",
+    "tests",
+    "docs",
+    "README.md",
+    "DATA_ACCESS.md",
+    "LICENSE",
+    ".env.example",
+    "*.plist.template"
+  ],
   "scripts": {
     "start": "node --experimental-sqlite --experimental-strip-types --no-warnings src/index.ts",
     "dev": "node --experimental-sqlite --experimental-strip-types --watch --no-warnings src/index.ts",
     "test": "./tests/run-all.sh",
-    "test:hermetic": "TEST_FILTER='unit invariants fixture auth-stale context-length cli-commands frontend-detail workflow-projection workflow-frontend watcher-rehome token-backfill parent-child' ./tests/run-all.sh",
+    "test:hermetic": "TEST_FILTER='unit invariants fixture auth-stale context-length cli-commands frontend-detail workflow-projection workflow-frontend session-id-scope env-config service-self-check watcher-rehome token-backfill parent-child' ./tests/run-all.sh",
     "test:unit": "node --experimental-sqlite --experimental-strip-types --no-warnings tests/run-tests.ts",
     "test:invariants": "node --experimental-sqlite --experimental-strip-types --no-warnings tests/parser-invariants.test.ts",
     "test:fixture": "node --experimental-sqlite --experimental-strip-types --no-warnings tests/fixture-ingest.test.ts",
@@ -18,6 +46,9 @@
     "test:frontend-detail": "node --experimental-sqlite --experimental-strip-types --no-warnings tests/frontend-detail-view.test.ts",
     "test:workflow-projection": "node --experimental-sqlite --experimental-strip-types --no-warnings tests/workflow-projection.test.ts",
     "test:workflow-frontend": "node --experimental-sqlite --experimental-strip-types --no-warnings tests/workflow-frontend.test.ts",
+    "test:session-id-scope": "node --experimental-sqlite --experimental-strip-types --no-warnings tests/session-id-scope.test.ts",
+    "test:env-config": "node --experimental-sqlite --experimental-strip-types --no-warnings tests/env-config.test.ts",
+    "test:service-self-check": "node --experimental-sqlite --experimental-strip-types --no-warnings tests/service-self-check.test.ts",
     "test:watcher-rehome": "node --experimental-sqlite --experimental-strip-types --no-warnings tests/watcher-rehome.test.ts",
     "test:token-backfill": "node --experimental-sqlite --experimental-strip-types --no-warnings tests/token-backfill.test.ts",
     "test:parent-child": "node --experimental-sqlite --experimental-strip-types --no-warnings tests/parent-child.test.ts",

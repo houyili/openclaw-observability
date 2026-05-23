@@ -22,6 +22,7 @@ export interface TranscriptMessage {
 export interface ParsedRun {
   runId: string;
   sessionKey: string;
+  sessionId?: string;
   startedAt: string;
   endedAt?: string;
   durationMs?: number;
@@ -68,7 +69,7 @@ export interface ParsedStep {
 
 // ─── Parsing ────────────────────────────────────────────────────
 
-export function parseTranscript(entries: TranscriptEntry[], sessionKey: string): ParsedRun[] {
+export function parseTranscript(entries: TranscriptEntry[], sessionKey: string, sessionId?: string): ParsedRun[] {
   const runs: ParsedRun[] = [];
   let currentRun: ParsedRun | null = null;
   let prevAssistantInputTokens: number | null = null;
@@ -83,6 +84,7 @@ export function parseTranscript(entries: TranscriptEntry[], sessionKey: string):
       currentRun = {
         runId: entry.id,
         sessionKey,
+        sessionId,
         startedAt: entry.timestamp,
         steps: [],
         totalTokens: 0,

@@ -1,22 +1,13 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { CONFIG } from "../config.ts";
+import { getEnvValue } from "../env.ts";
 
 // ─── Auth token ─────────────────────────────────────────────────
 function loadAuthToken(): string | null {
-  // 1. Environment variable
-  if (process.env.OBS_AUTH_TOKEN) return process.env.OBS_AUTH_TOKEN;
-  // 2. .env file in project root
   const envPath = join(import.meta.dirname, "..", "..", ".env");
-  if (existsSync(envPath)) {
-    const lines = readFileSync(envPath, "utf-8").split("\n");
-    for (const line of lines) {
-      const m = line.match(/^OBS_AUTH_TOKEN\s*=\s*(.+)/);
-      if (m) return m[1].trim();
-    }
-  }
-  return null;
+  return getEnvValue("OBS_AUTH_TOKEN", envPath);
 }
 
 const AUTH_TOKEN = loadAuthToken();

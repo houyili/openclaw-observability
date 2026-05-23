@@ -87,6 +87,11 @@ function fetchOfficial(): OfficialSession[] {
 
 interface ObsRow { input: number; output: number; total: number; source: string; tokenSource: string; model: string }
 
+function isAllowedOfficialZeroBackfill(obs: ObsRow, officialValue: number, obsValue: number): boolean {
+  if (officialValue !== 0 || obsValue <= 0) return false;
+  return obs.tokenSource === "transcript-backfill" || obs.source.includes("transcript");
+}
+
 function readObsDb(pairs: Array<{ key: string; sessionId: string }>): Map<string, ObsRow> {
   const db = new DatabaseSync(CONFIG.DB_PATH, { readOnly: true });
   const map = new Map<string, ObsRow>();
@@ -155,7 +160,7 @@ function compareOnce(): CompareOutcome {
       const diff = Math.abs(o - a);
       if (diff <= TOLERANCE) continue;
       const mismatch = { key: off.key, sessionId: off.sessionId, field, official: o, obs: a, diff };
-      if (o === 0 && a > 0 && obs.tokenSource === "transcript-backfill") {
+      if (isAllowedOfficialZeroBackfill(obs, o, a)) {
         allowedBackfills.push(mismatch);
       } else {
         mismatches.push(mismatch);

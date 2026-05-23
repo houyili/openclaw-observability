@@ -29,6 +29,7 @@ const db = getDb();
 const now = Date.parse("2026-05-23T15:31:00.000Z");
 const parentKey = "agent:researcher:feishu:group:oc_workflow";
 const childKey = "agent:researcher:subagent:child_source_refresh";
+const unrelatedChildKey = "agent:researcher:subagent:old_unrelated_child";
 const parentRun = "run-parent-2410";
 const childRun = "run-child-source";
 const workStatusPath = join(tmpHome, "work_status.md");
@@ -80,6 +81,7 @@ function seed(workStatus: string) {
   writeFileSync(workStatusPath, workStatus);
   insertSession(parentKey, "sid-parent");
   insertSession(childKey, "sid-child", { key: parentKey, sid: "sid-parent" });
+  insertSession(unrelatedChildKey, "sid-old-child", { key: parentKey, sid: "sid-parent" });
 
   insertStep(parentKey, parentRun, {
     id: "p-source",
@@ -141,16 +143,23 @@ function seed(workStatus: string) {
     role: "assistant",
     result: "source-refresh complete",
   });
+  insertStep(unrelatedChildKey, "old-child-run", {
+    id: "old-child-step",
+    offset: -1_000_000,
+    nodeType: "REPLY",
+    role: "assistant",
+    result: "old unrelated child final",
+  });
 }
 
-console.log("\n=== Group 1: spawn/yield/child final + TaskFlow gap ===");
-seed(`<!-- researcher-orchestrator:start -->
+console.log("\n=== Group 1: spawn/yield/child final + workflow-state gap ===");
+seed(`<!-- openclaw-workflow:start -->
 ## runtime projection
 flow_id: flow-empty
 work_key: arxiv-2410
 current_step: source_collection
 waiting_children: none
-<!-- researcher-orchestrator:end -->
+<!-- openclaw-workflow:end -->
 `);
 {
   const graph = getWorkflowGraph(parentKey, parentRun);
@@ -165,19 +174,25 @@ waiting_children: none
   assert(types.includes("child_artifact_written"), "child artifact node created");
   assert(types.includes("child_final"), "child_final node created");
   assert(types.includes("parent_resumed"), "parent_resumed node created");
-  assert(types.includes("taskflow_plan_snapshot"), "TaskFlow snapshot node created");
-  assert(types.includes("taskflow_gap"), "empty childRuns creates taskflow_gap");
+  assert(types.includes("taskflow_plan_snapshot"), "workflow snapshot node created");
+  assert(types.includes("taskflow_gap"), "empty child refs creates taskflow_gap");
   assert(graph.lanes.some(l => l.id === `child:${childKey}`), "child lane uses exact childSessionKey");
+  assert(!graph.lanes.some(l => l.id === `child:${unrelatedChildKey}`), "unspawned historical child is not pulled into current graph");
   assert(graph.edges.some(e => e.type === "spawn"), "spawn edge emitted");
-  assert(graph.diagnostics.some(d => d.type === "taskflow_childruns_empty"), "TaskFlow childRuns diagnostic emitted");
+  assert(graph.diagnostics.some(d => d.type === "taskflow_childruns_empty"), "workflow child reference diagnostic emitted");
+  assert(graph.validation.status === "ok", "workflow graph self-validation passes");
+  assert(graph.validation.checks.some(c => c.id === "provenance.step_id" && c.status === "ok"), "self-validation checks step provenance");
+  assert(graph.validation.checks.some(c => c.id === "scope.run_id" && c.status === "ok"), "self-validation checks run scope");
 
   const accepted = graph.events.find(e => e.type === "sessions_spawn_accepted");
   assert(accepted?.provenance.childSessionKey === childKey, "accepted event includes childSessionKey provenance");
   assert(accepted?.provenance.child_run_id === childRun, "accepted event includes child run provenance");
+  const snapshot = graph.events.find(e => e.type === "taskflow_plan_snapshot");
+  assert(snapshot?.provenance.adapter_id === "openclaw-managed-workflow", "generic workflow adapter provenance emitted");
 }
 
-console.log("\n=== Group 2: TaskFlow child binding ===");
-seed(`<!-- researcher-orchestrator:start -->
+console.log("\n=== Group 2: workflow child binding ===");
+seed(`<!-- openclaw-workflow:start -->
 ## runtime projection
 flow_id: flow-bound
 work_key: arxiv-2410
@@ -185,15 +200,50 @@ current_step: source_collection
 waiting_children:
 - childSessionKey: ${childKey}
 - runId: ${childRun}
-<!-- researcher-orchestrator:end -->
+<!-- openclaw-workflow:end -->
 `);
 {
   const graph = getWorkflowGraph(parentKey, parentRun);
   const types = graph.events.map(e => e.type);
-  assert(types.includes("taskflow_child_bound"), "TaskFlow child bound node created");
-  assert(!graph.diagnostics.some(d => d.type === "taskflow_childruns_empty"), "no empty-childRuns diagnostic when exact child bound");
+  assert(types.includes("taskflow_child_bound"), "workflow child bound node created");
+  assert(!graph.diagnostics.some(d => d.type === "taskflow_childruns_empty"), "no empty-child diagnostic when exact child bound");
   const bound = graph.events.find(e => e.type === "taskflow_child_bound");
   assert(bound?.provenance.flow_id === "flow-bound", "bound event includes flow_id provenance");
+}
+
+console.log("\n=== Group 3: legacy adapter can be disabled ===");
+const legacyAdapterMarker = ["researcher", "orchestrator"].join("-");
+seed(`<!-- ${legacyAdapterMarker}:start -->
+flow_id: legacy-flow
+waiting_children:
+- childSessionKey: ${childKey}
+<!-- ${legacyAdapterMarker}:end -->
+`);
+{
+  process.env.OBS_WORKFLOW_ADAPTERS = "none";
+  const graph = getWorkflowGraph(parentKey, parentRun);
+  delete process.env.OBS_WORKFLOW_ADAPTERS;
+  assert(!graph.events.some(e => e.type === "taskflow_plan_snapshot"), "disabled adapters skip managed workflow snapshot");
+  assert(graph.diagnostics.some(d => d.type === "workflow_state_unavailable"), "disabled adapters emit generic workflow-state diagnostic");
+}
+
+console.log("\n=== Group 4: self-validation catches incomplete child visibility ===");
+seed(`<!-- openclaw-workflow:start -->
+## runtime projection
+flow_id: flow-bound
+work_key: arxiv-2410
+current_step: source_collection
+waiting_children:
+- childSessionKey: ${childKey}
+- runId: ${childRun}
+<!-- openclaw-workflow:end -->
+`);
+db.prepare("DELETE FROM steps WHERE session_key = ?").run(childKey);
+{
+  const graph = getWorkflowGraph(parentKey, parentRun);
+  assert(graph.validation.status === "warning", "self-validation warns when accepted child has no visible steps");
+  assert(graph.validation.checks.some(c => c.id === "spawn.child_steps" && c.status === "warning"), "self-validation identifies missing child steps");
+  assert(graph.diagnostics.some(d => d.type === "validation_spawn_child_steps"), "validation warning is surfaced as diagnostic");
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

@@ -1,19 +1,17 @@
 #!/usr/bin/env python3
-"""Install ngrok authtoken into macOS Keychain and configure the fixed tunnel.
+"""Install ngrok authtoken and configure a fixed tunnel.
 
-This script:
-1. Compiles the Swift keychain helper (token never touches disk/shell history)
-2. Prompts user to enter authtoken interactively
-3. Saves token to macOS Keychain
-4. Configures ngrok with the authtoken
-5. Reserves a fixed subdomain (if not already reserved)
-6. Tests connectivity
+On macOS this stores the token in Keychain through the Swift helper.
+On Linux/other hosts it reads OBS_NGROK_AUTHTOKEN or
+~/.config/openclaw/ngrok-authtoken.
 """
 
+import getpass
 import os
 import shutil
 import subprocess
 import sys
+import stat
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).parent
@@ -22,6 +20,7 @@ BINARY_DIR = Path.home() / 'Library' / 'Application Support' / 'OpenClaw' / 'obs
 BINARY_PATH = BINARY_DIR / 'ngrok_keychain'
 NGROK_BIN = Path.home() / '.local' / 'bin' / 'ngrok'
 ENV_FILE = SCRIPT_DIR.parent / '.env'
+LINUX_TOKEN_FILE = Path.home() / '.config' / 'openclaw' / 'ngrok-authtoken'
 DASHBOARD_PORT = 18902
 
 
@@ -69,6 +68,34 @@ def configure_ngrok(token: str) -> None:
     subprocess.run([str(NGROK_BIN), 'config', 'add-authtoken', token],
                    check=True, capture_output=True)
     print('ngrok authtoken configured.')
+
+
+def get_linux_token() -> str:
+    token = os.environ.get('OBS_NGROK_AUTHTOKEN', '').strip()
+    if token:
+        return token
+
+    if LINUX_TOKEN_FILE.exists():
+        mode = stat.S_IMODE(LINUX_TOKEN_FILE.stat().st_mode)
+        if mode & 0o077:
+            raise RuntimeError(f'{LINUX_TOKEN_FILE} must not be group/world readable; run chmod 600 {LINUX_TOKEN_FILE}')
+        token = LINUX_TOKEN_FILE.read_text().strip()
+        if token:
+            return token
+
+    print()
+    print('=' * 50)
+    print('Please enter your ngrok authtoken.')
+    print('Get it from: https://dashboard.ngrok.com/get-started/your-authtoken')
+    print(f'It will be saved to {LINUX_TOKEN_FILE} with mode 0600.')
+    print('=' * 50)
+    token = getpass.getpass('ngrok authtoken: ').strip()
+    if not token:
+        raise RuntimeError('No token provided')
+    LINUX_TOKEN_FILE.parent.mkdir(parents=True, exist_ok=True)
+    LINUX_TOKEN_FILE.write_text(token + '\n')
+    os.chmod(LINUX_TOKEN_FILE, 0o600)
+    return token
 
 
 def get_or_create_domain() -> str:
@@ -155,15 +182,19 @@ def main() -> int:
         print('Install: curl -s https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-darwin-arm64.tgz | tar xz -C ~/.local/bin/')
         return 1
 
-    # Compile keychain helper
-    swiftc = find_swiftc()
-    binary = compile_keychain_helper(swiftc)
+    if sys.platform == 'darwin':
+        # Compile keychain helper
+        swiftc = find_swiftc()
+        binary = compile_keychain_helper(swiftc)
 
-    # Install token to keychain
-    install_token(binary)
+        # Install token to keychain
+        install_token(binary)
 
-    # Read back and configure ngrok
-    token = get_token(binary)
+        # Read back and configure ngrok
+        token = get_token(binary)
+    else:
+        token = get_linux_token()
+
     configure_ngrok(token)
 
     # Get or create domain
@@ -179,9 +210,8 @@ def main() -> int:
     print(f'Fixed URL: https://{domain}')
     print()
     print('Next steps:')
-    print('1. Restart dashboard: sh scripts/service.sh restart')
-    print('2. Start tunnel:      sh scripts/tunnel-ngrok.sh start')
-    print('3. In Feishu, say:    observability')
+    print('1. Restart dashboard if needed: sh scripts/service.sh restart')
+    print('2. Start tunnel:              sh scripts/tunnel-ngrok.sh start')
     print('=' * 50)
 
     return 0

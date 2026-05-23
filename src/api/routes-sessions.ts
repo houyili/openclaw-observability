@@ -31,8 +31,8 @@ export const handleSessionsRoutes = {
     const parentInfo = getParentInfoBatch(parentSessionIds);
 
     const result = sessions.map(s => {
-      const latestRun = getLatestRun(s.session_key);
-      const activityBars = getActivityBars(s.session_key);
+      const latestRun = getLatestRun(s.session_key, s.session_id);
+      const activityBars = getActivityBars(s.session_key, s.session_id);
 
       // Compute lastBlockDurationMs: time since last stuck step
       let lastBlockDurationMs: number | null = null;
@@ -93,8 +93,8 @@ export const handleSessionsRoutes = {
     const session = getSession(key);
     if (!session) return sendJson(res, { error: "Session not found" }, 404);
 
-    const latestRun = getLatestRun(key);
-    const activityBars = getActivityBars(key);
+    const latestRun = getLatestRun(key, session.session_id);
+    const activityBars = getActivityBars(key, session.session_id);
 
     sendJson(res, {
       session: { ...session },
@@ -104,11 +104,11 @@ export const handleSessionsRoutes = {
   },
 
   workflow(key: string, query: Record<string, string>, res: ServerResponse, sendJson: SendJson) {
-    return sendJson(res, getWorkflowGraph(key, query.runId));
+    return sendJson(res, getWorkflowGraph(key, query.runId, query.sessionId));
   },
 
   trace(key: string, query: Record<string, string>, res: ServerResponse, sendJson: SendJson) {
-    const allSpans = getTraceSpans(key, query.runId);
+    const allSpans = getTraceSpans(key, query.runId, query.sessionId);
     // Filter out toolResult rows (their data is already merged into the toolCall step)
     const spans = allSpans.filter((s: any) => s.role !== "toolResult");
     if (spans.length === 0) return sendJson(res, { sessionKey: key, spans: [] });
@@ -175,10 +175,11 @@ export const handleSessionsRoutes = {
     }));
 
     // Include run list for run selector
-    const runs = getRunList(key);
+    const runs = getRunList(key, query.sessionId);
 
     sendJson(res, {
       sessionKey: key,
+      sessionId: query.sessionId || null,
       runId: (spans[0] as any).run_id,
       startedAt: (spans[0] as any).ts,
       traceDurationMs: adjustedMaxEnd,
@@ -207,15 +208,16 @@ export const handleSessionsRoutes = {
    *   → 404 if no MODEL_THINK rows
    */
   context(key: string, query: Record<string, string>, res: ServerResponse, sendJson: SendJson) {
-    const result = getContextBoth(key, query.runId);
+    const result = getContextBoth(key, query.runId, query.sessionId);
     if (!result) {
       return sendJson(res, { error: "No assistant turns found for this run" }, 404);
     }
     const { breakdown, timeline } = result;
-    const runs = getRunList(key);
+    const runs = getRunList(key, query.sessionId);
 
     sendJson(res, {
       sessionKey: key,
+      sessionId: query.sessionId || null,
       runId: breakdown.runId,
       breakdown,
       timeline,

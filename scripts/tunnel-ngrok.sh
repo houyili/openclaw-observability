@@ -7,23 +7,21 @@
 
 set -e
 
-NGROK_BIN="$HOME/.local/bin/ngrok"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+. "$SCRIPT_DIR/env.sh"
+
+NGROK_BIN="${NGROK_BIN:-$HOME/.local/bin/ngrok}"
 LOG_DIR="$HOME/.openclaw/logs/observability-v2"
 PID_FILE="$LOG_DIR/ngrok.pid"
-ENV_FILE="$HOME/.openclaw/extensions/observability-v2/.env"
+ENV_FILE="${OBS_ENV_FILE:-$(obs_env_file)}"
 DASHBOARD_PORT=18902
 
 mkdir -p "$LOG_DIR"
 
 # Read config from .env
-DOMAIN=""
-TOKEN=""
-FIXED_URL=""
-if [ -f "$ENV_FILE" ]; then
-  DOMAIN=$(grep '^OBS_NGROK_DOMAIN=' "$ENV_FILE" 2>/dev/null | cut -d= -f2- || true)
-  TOKEN=$(grep '^OBS_AUTH_TOKEN=' "$ENV_FILE" 2>/dev/null | cut -d= -f2- || true)
-  FIXED_URL=$(grep '^OBS_FIXED_URL=' "$ENV_FILE" 2>/dev/null | cut -d= -f2- || true)
-fi
+DOMAIN="${OBS_NGROK_DOMAIN:-$(obs_read_env_value OBS_NGROK_DOMAIN "$ENV_FILE")}"
+TOKEN="${OBS_AUTH_TOKEN:-$(obs_read_env_value OBS_AUTH_TOKEN "$ENV_FILE")}"
+FIXED_URL="${OBS_FIXED_URL:-$(obs_read_env_value OBS_FIXED_URL "$ENV_FILE")}"
 
 is_running() {
   [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null

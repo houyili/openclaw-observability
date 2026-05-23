@@ -25,6 +25,8 @@ export function upsertAuthSessions(sessions: AuthSession[]): void {
           OR COALESCE(excluded.output_tokens, 0) > 0
           OR COALESCE(excluded.context_tokens, 0) > 0
         THEN 'official'
+        WHEN sessions.source LIKE '%transcript%' AND COALESCE(sessions.total_tokens, 0) > 0
+        THEN 'transcript-backfill'
         ELSE COALESCE(sessions.token_source, excluded.token_source, 'official-zero')
       END
   `);

@@ -146,11 +146,11 @@ function findTranscriptFiles(): string[] {
 
 export function startTranscriptWatcher(callbacks: WatcherCallbacks): { stop: () => void } {
   const db = getDb();
-  const getOffset = db.prepare("SELECT byte_offset, session_key FROM ingest_state WHERE file_path = ?");
+  const getOffset = db.prepare("SELECT byte_offset, session_key, session_id FROM ingest_state WHERE file_path = ?");
   const upsertOffset = db.prepare(`
-    INSERT INTO ingest_state (file_path, byte_offset, session_key, updated_at)
-    VALUES (?, ?, ?, ?)
-    ON CONFLICT(file_path) DO UPDATE SET byte_offset=excluded.byte_offset, session_key=excluded.session_key, updated_at=excluded.updated_at
+    INSERT INTO ingest_state (file_path, byte_offset, session_key, session_id, updated_at)
+    VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(file_path) DO UPDATE SET byte_offset=excluded.byte_offset, session_key=excluded.session_key, session_id=excluded.session_id, updated_at=excluded.updated_at
   `);
 
   let running = true;
@@ -179,11 +179,13 @@ export function startTranscriptWatcher(callbacks: WatcherCallbacks): { stop: () 
 
     const row = getOffset.get(filePath) as any;
     const cachedKey = row?.session_key || null;
+    const cachedSessionId = row?.session_id || null;
 
     // Full-file reparse on every change (see top-of-file note on why).
     const { entries, size } = readAllEntries(filePath);
     if (entries.length === 0) {
-      upsertOffset.run(filePath, size, cachedKey, new Date().toISOString());
+      const emptySessionId = cachedSessionId || extractSessionIdFromFile(filePath);
+      upsertOffset.run(filePath, size, cachedKey, emptySessionId, new Date().toISOString());
       return;
     }
 
@@ -200,18 +202,18 @@ export function startTranscriptWatcher(callbacks: WatcherCallbacks): { stop: () 
         // Found a proper key, or first time — use it.
         // If key changed, we need to re-home existing steps.
         if (sessionKey && sessionKey !== resolved) {
-          db.prepare("UPDATE steps SET session_key = ? WHERE session_key = ?").run(resolved, sessionKey);
+          db.prepare("UPDATE steps SET session_key = ?, session_id = COALESCE(session_id, ?) WHERE session_key = ?").run(resolved, sessionId, sessionKey);
         }
         sessionKey = resolved;
       }
     }
 
-    const runs = parseTranscript(entries, sessionKey);
+    const runs = parseTranscript(entries, sessionKey, sessionId);
     if (runs.length > 0) {
       callbacks.onRuns(sessionKey, runs);
     }
 
-    upsertOffset.run(filePath, size, sessionKey, new Date().toISOString());
+    upsertOffset.run(filePath, size, sessionKey, sessionId, new Date().toISOString());
   }
 
   function tick(): void {

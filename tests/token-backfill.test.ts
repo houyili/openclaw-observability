@@ -36,7 +36,7 @@ mkdirSync(join(tmpHome, "logs/observability-v2"), { recursive: true });
 process.env.OPENCLAW_HOME = tmpHome;
 
 const { getDb, closeDb } = await import("../src/storage/db.ts");
-const { recomputeSessionCounts, recomputeAllSessionCounts } = await import("../src/storage/sessions-repo.ts");
+const { recomputeSessionCounts, recomputeAllSessionCounts, upsertAuthSessions } = await import("../src/storage/sessions-repo.ts");
 
 const db = getDb();
 const now = Date.now();
@@ -168,6 +168,39 @@ console.log("\n=== Group 2: Do NOT override non-zero auth-poller tokens ===");
   assert((sess.token_source || "official") === "official",
     "token_source remains official when auth tokens are non-zero",
     `got ${sess.token_source}`);
+}
+
+// ═══════════════════════════════════════════════════════════════
+console.log("\n=== Group 2b: Official-zero poll marks preserved transcript values ===");
+// ═══════════════════════════════════════════════════════════════
+
+{
+  const KEY = "agent:test:subagent:official-zero-after-transcript";
+  insertSession(KEY, "sid-official-zero", { totalTokens: 1234, inputTokens: 1200, outputTokens: 34, contextTokens: 1200 });
+  db.prepare("UPDATE sessions SET source = 'transcript+auth', token_source = 'official' WHERE session_key = ?").run(KEY);
+
+  upsertAuthSessions([{
+    sessionKey: KEY,
+    sessionId: "sid-official-zero",
+    agentId: "test",
+    channel: "subagent",
+    diag: "sub",
+    label: null,
+    kind: "direct",
+    model: "gpt-5",
+    modelProvider: null,
+    inputTokens: 0,
+    outputTokens: 0,
+    totalTokens: 0,
+    contextTokens: 0,
+    runtimeMode: null,
+    updatedAt: now + 1,
+    ageMs: 0,
+  }]);
+
+  const sess = db.prepare("SELECT * FROM sessions WHERE session_key = ?").get(KEY) as any;
+  assert(sess.total_tokens === 1234, "official-zero poll preserves existing nonzero total_tokens", `got ${sess.total_tokens}`);
+  assert(sess.token_source === "transcript-backfill", "official-zero poll marks transcript-backfill", `got ${sess.token_source}`);
 }
 
 

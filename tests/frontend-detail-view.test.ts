@@ -352,6 +352,25 @@ console.log("\n=== Group 4: refreshDetail integration ===");
   assert(!html.includes("selectDetailView"), "no toggle handler leaked");
 }
 
+// ─── Group 4b: run selector is compact by default ──────────────
+console.log("\n=== Group 4b: compact run selector ===");
+{
+  const { ctx } = loadAppJs();
+  const runs = Array.from({ length: 30 }, (_, i) => ({
+    runId: `run-${i}`,
+    startedAt: new Date(1779529000000 - i * 60_000).toISOString(),
+    durationMs: 1000,
+    modelSteps: 1,
+    toolSteps: 1,
+    status: "completed",
+  }));
+  const compact = ctx.renderRunSelector(runs, "run-0");
+  const compactCount = (compact.match(/class="run-item/g) || []).length;
+  assert(compactCount === 18, "compact run selector shows latest 18 by default", `count=${compactCount}`);
+  assert(compact.includes("Runs 30") && compact.includes("latest 18"), "compact label shows total and visible count");
+  assert(compact.includes("toggleRunSelector"), "run selector exposes all/compact toggle");
+}
+
 // ─── Group 5: refreshDetail is resilient to missing context ─
 console.log("\n=== Group 5: refreshDetail with missing context data ===");
 {
@@ -409,7 +428,7 @@ console.log("\n=== Group 8: structural file invariants ===");
   assert(source.includes("detail-section-trace"), "trace section class present");
   assert(source.includes("detail-section-context"), "context section class present");
   // The 5s poll path from refreshSessions must go through refreshDetail, not refreshTrace.
-  assert(/refreshSessions[\s\S]*refreshDetail\(expandedSessionKey\)/.test(source),
+  assert(/refreshSessions[\s\S]*refreshDetail\(expandedSessionKey,\s*expandedSessionId\)/.test(source),
     "refreshSessions calls refreshDetail on poll");
   assert(!/refreshSessions[\s\S]*refreshTrace\(expandedSessionKey\)/.test(source),
     "refreshSessions does NOT call refreshTrace directly");

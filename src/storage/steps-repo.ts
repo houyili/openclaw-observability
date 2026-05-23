@@ -8,15 +8,16 @@ export function upsertSteps(run: ParsedRun): void {
   // re-upsert (e.g. on first-tick reparse after a parser fix) backfills
   // older rows in place.
   const stmt = db.prepare(`
-    INSERT INTO steps (step_id, session_key, run_id, parent_step_id, seq, ts, ts_epoch_ms,
+    INSERT INTO steps (step_id, session_key, session_id, run_id, parent_step_id, seq, ts, ts_epoch_ms,
       role, node_type, tool_name, tool_call_id, skill_name, script_name, mcp_server, mcp_tool,
       duration_ms, total_tokens, output_tokens, input_text_len, result_text_len,
       context_token_delta, status, error_text, error_type, is_stuck, is_current,
       input_preview, result_preview,
       input_tokens, cache_read_tokens, thinking_text_len, reply_text_len)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
             ?, ?, ?, ?)
     ON CONFLICT(step_id) DO UPDATE SET
+      session_id=COALESCE(excluded.session_id, steps.session_id),
       duration_ms=excluded.duration_ms, status=excluded.status, error_text=excluded.error_text,
       error_type=excluded.error_type, is_stuck=excluded.is_stuck, is_current=excluded.is_current,
       result_text_len=excluded.result_text_len, result_preview=excluded.result_preview,
@@ -26,7 +27,7 @@ export function upsertSteps(run: ParsedRun): void {
 
   for (const s of run.steps) {
     stmt.run(
-      s.stepId, run.sessionKey, run.runId, s.parentStepId, s.seq, s.ts, s.tsEpochMs,
+      s.stepId, run.sessionKey, run.sessionId || null, run.runId, s.parentStepId, s.seq, s.ts, s.tsEpochMs,
       s.role, s.nodeType, s.toolName || null, s.toolCallId || null,
       s.skillName || null, s.scriptName || null, s.mcpServer || null, s.mcpTool || null,
       s.durationMs ?? null, s.totalTokens ?? null, s.outputTokens ?? null,
@@ -50,64 +51,74 @@ export interface LatestRunInfo {
   status: string;
 }
 
-export function getLatestRun(sessionKey: string): LatestRunInfo | null {
+function toBaseKey(sessionKey: string): string {
+  return sessionKey.replace(/:run:[a-f0-9-]+$/, "");
+}
+
+export function getLatestRun(sessionKey: string, sessionId?: string | null): LatestRunInfo | null {
   const db = getDb();
-  sessionKey = sessionKey.replace(/:run:[a-f0-9-]+$/, "");
+  const baseKey = toBaseKey(sessionKey);
   // Find the latest run_id for this session (run_id = the user message entry id)
-  const row = db.prepare(`
+  const sql = `
     SELECT run_id, MIN(ts) as started_at, MAX(ts) as ended_at,
       MAX(ts_epoch_ms) - MIN(ts_epoch_ms) as duration_ms,
       SUM(CASE WHEN node_type = 'MODEL_THINK' THEN 1 ELSE 0 END) as model_steps,
       SUM(CASE WHEN node_type NOT IN ('MODEL_THINK', 'REPLY') AND role = 'assistant' THEN 1 ELSE 0 END) as tool_steps,
       CASE WHEN SUM(is_current) > 0 THEN 'running' ELSE 'completed' END as status
-    FROM steps WHERE session_key = ?
+    FROM steps WHERE ${sessionId ? "session_id = ?" : "session_key = ?"}
     GROUP BY run_id
     ORDER BY MIN(ts_epoch_ms) DESC LIMIT 1
-  `).get(sessionKey) as any;
+  `;
+  const row = db.prepare(sql).get(sessionId || baseKey) as any;
   return row || null;
 }
 
-export function getRunList(sessionKey: string): LatestRunInfo[] {
+export function getRunList(sessionKey: string, sessionId?: string | null): LatestRunInfo[] {
   const db = getDb();
-  const baseKey = sessionKey.replace(/:run:[a-f0-9-]+$/, "");
-  return db.prepare(`
+  const baseKey = toBaseKey(sessionKey);
+  const sql = `
     SELECT run_id, MIN(ts) as started_at, MAX(ts) as ended_at,
       MAX(ts_epoch_ms) - MIN(ts_epoch_ms) as duration_ms,
       SUM(CASE WHEN node_type = 'MODEL_THINK' THEN 1 ELSE 0 END) as model_steps,
       SUM(CASE WHEN node_type NOT IN ('MODEL_THINK', 'REPLY') AND role = 'assistant' THEN 1 ELSE 0 END) as tool_steps,
       CASE WHEN SUM(is_current) > 0 THEN 'running' ELSE 'completed' END as status
-    FROM steps WHERE session_key = ?
+    FROM steps WHERE ${sessionId ? "session_id = ?" : "session_key = ?"}
     GROUP BY run_id
     ORDER BY MIN(ts_epoch_ms) DESC
-  `).all(baseKey) as LatestRunInfo[];
+  `;
+  const rows = db.prepare(sql).all(sessionId || baseKey) as LatestRunInfo[];
+  return rows;
 }
 
-export function getTraceSpans(sessionKey: string, runId?: string): any[] {
+export function getTraceSpans(sessionKey: string, runId?: string, sessionId?: string | null): any[] {
   const db = getDb();
   // Strip :run:UUID suffix for step lookup
-  const baseKey = sessionKey.replace(/:run:[a-f0-9-]+$/, "");
+  const baseKey = toBaseKey(sessionKey);
   let sql: string;
   let params: any[];
+  const keyCol = sessionId ? "session_id" : "session_key";
+  const keyValue = sessionId || baseKey;
 
   if (runId) {
-    sql = "SELECT * FROM steps WHERE session_key = ? AND run_id = ? ORDER BY seq";
-    params = [baseKey, runId];
+    sql = `SELECT * FROM steps WHERE ${keyCol} = ? AND run_id = ? ORDER BY seq`;
+    params = [keyValue, runId];
   } else {
     // Get latest run's steps
     const latestRunId = db.prepare(`
-      SELECT run_id FROM steps WHERE session_key = ?
+      SELECT run_id FROM steps WHERE ${keyCol} = ?
       GROUP BY run_id ORDER BY MIN(ts_epoch_ms) DESC LIMIT 1
-    `).get(baseKey) as any;
+    `).get(keyValue) as any;
     if (!latestRunId) return [];
-    sql = "SELECT * FROM steps WHERE session_key = ? AND run_id = ? ORDER BY seq";
-    params = [baseKey, latestRunId.run_id];
+    sql = `SELECT * FROM steps WHERE ${keyCol} = ? AND run_id = ? ORDER BY seq`;
+    params = [keyValue, latestRunId.run_id];
   }
-  return db.prepare(sql).all(...params);
+  const rows = db.prepare(sql).all(...params);
+  return rows;
 }
 
-export function getActivityBars(sessionKey: string): number[] {
+export function getActivityBars(sessionKey: string, sessionId?: string | null): number[] {
   const db = getDb();
-  sessionKey = sessionKey.replace(/:run:[a-f0-9-]+$/, "");
+  sessionKey = toBaseKey(sessionKey);
   const now = Date.now();
   const buckets = CONFIG.ACTIVITY_BAR_BUCKETS;        // 60
   const windowMs = CONFIG.ACTIVITY_BAR_MINUTES * 60_000; // 240 min = 4h
@@ -116,9 +127,9 @@ export function getActivityBars(sessionKey: string): number[] {
 
   const rows = db.prepare(`
     SELECT ts_epoch_ms, status, is_stuck FROM steps
-    WHERE session_key = ? AND ts_epoch_ms >= ?
+    WHERE ${sessionId ? "session_id" : "session_key"} = ? AND ts_epoch_ms >= ?
     ORDER BY ts_epoch_ms
-  `).all(sessionKey, startMs) as any[];
+  `).all(sessionId || sessionKey, startMs) as any[];
 
   const bars = new Array(buckets).fill(0); // 0=idle
   for (const row of rows) {

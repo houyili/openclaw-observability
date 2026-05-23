@@ -7,6 +7,9 @@
 
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+. "$SCRIPT_DIR/env.sh"
+
 CLOUDFLARED="${CLOUDFLARED_BIN:-$(which cloudflared 2>/dev/null || echo "$HOME/.local/bin/cloudflared")}"
 LOG_DIR="$HOME/.openclaw/logs/observability-v2"
 PID_FILE="$LOG_DIR/tunnel.pid"
@@ -111,13 +114,7 @@ do_url() {
         URL=$(cat "$URL_FILE" 2>/dev/null || extract_url)
       fi
       if [ -n "$URL" ]; then
-        TOKEN="${OBS_AUTH_TOKEN:-}"
-        if [ -z "$TOKEN" ]; then
-          ENV_FILE="$HOME/.openclaw/extensions/observability-v2/.env"
-          if [ -f "$ENV_FILE" ]; then
-            TOKEN=$(grep '^OBS_AUTH_TOKEN=' "$ENV_FILE" 2>/dev/null | cut -d= -f2-)
-          fi
-        fi
+        TOKEN="${OBS_AUTH_TOKEN:-$(obs_read_env_value OBS_AUTH_TOKEN "${OBS_ENV_FILE:-$(obs_env_file)}")}"
         if [ -n "$TOKEN" ]; then
           echo "{\"status\":\"ok\",\"url\":\"${URL}/#token=${TOKEN}\"}"
         else
@@ -132,11 +129,7 @@ do_url() {
   sleep 3
   # Read fresh URL
   URL=$(cat "$URL_FILE" 2>/dev/null || extract_url)
-  TOKEN="${OBS_AUTH_TOKEN:-}"
-  if [ -z "$TOKEN" ]; then
-    ENV_FILE="$HOME/.openclaw/extensions/observability-v2/.env"
-    [ -f "$ENV_FILE" ] && TOKEN=$(grep '^OBS_AUTH_TOKEN=' "$ENV_FILE" 2>/dev/null | cut -d= -f2-)
-  fi
+  TOKEN="${OBS_AUTH_TOKEN:-$(obs_read_env_value OBS_AUTH_TOKEN "${OBS_ENV_FILE:-$(obs_env_file)}")}"
   if [ -n "$URL" ] && [ -n "$TOKEN" ]; then
     echo "{\"status\":\"ok\",\"url\":\"${URL}/#token=${TOKEN}\"}"
   elif [ -n "$URL" ]; then

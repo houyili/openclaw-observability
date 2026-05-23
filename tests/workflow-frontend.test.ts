@@ -103,24 +103,32 @@ function sampleWorkflow() {
     sessionKey: "parent",
     runId: "run-12345678",
     lanes: [
-      { id: "user", title: "User / Feishu", kind: "user" },
-      { id: "parent", title: "Parent Researcher", kind: "parent" },
+      { id: "user", title: "User", kind: "user" },
+      { id: "parent", title: "Parent Session", kind: "parent" },
       { id: "runtime", title: "OpenClaw Runtime", kind: "runtime" },
       { id: "child:abc", title: "Child abc", kind: "child" },
-      { id: "taskflow", title: "TaskFlow", kind: "taskflow" },
+      { id: "taskflow", title: "Workflow State", kind: "taskflow" },
     ],
     events: [
       { id: "e1", laneId: "user", type: "user_message", ts: "2026-05-23T07:31:00Z", tsEpochMs: 1, title: "user message", provenance: { run_id: "run-12345678" } },
-      { id: "e2", laneId: "parent", type: "sessions_spawn_requested", ts: "2026-05-23T07:31:01Z", tsEpochMs: 2, title: "sessions_spawn", provenance: { step_id: "step-spawn" } },
+      { id: "e1b", laneId: "parent", type: "skill_or_source_step", ts: "2026-05-23T07:31:00.500Z", tsEpochMs: 1.5, title: "research_query", provenance: { step_id: "step-source", duration_ms: 200 } },
+      { id: "e2", laneId: "parent", type: "sessions_spawn_requested", ts: "2026-05-23T07:31:01Z", tsEpochMs: 2, title: "sessions_spawn", provenance: { step_id: "step-spawn", duration_ms: 1200, input_tokens: 10000, cache_read_tokens: 2000, output_tokens: 80 } },
       { id: "e3", laneId: "runtime", type: "sessions_spawn_accepted", ts: "2026-05-23T07:31:01Z", tsEpochMs: 3, title: "spawn accepted", subtitle: "source-refresh", provenance: { childSessionKey: "abc", child_run_id: "child-run" } },
       { id: "e4", laneId: "child:abc", type: "child_final", ts: "2026-05-23T07:35:00Z", tsEpochMs: 4, title: "child final", provenance: { step_id: "child-final", artifact_path: "/tmp/source.md" } },
-      { id: "e5", laneId: "taskflow", type: "taskflow_gap", ts: "2026-05-23T07:35:01Z", tsEpochMs: 5, title: "childRuns gap", status: "warning", provenance: { flow_id: "flow-1" } },
+      { id: "e5", laneId: "taskflow", type: "taskflow_gap", ts: "2026-05-23T07:35:01Z", tsEpochMs: 5, title: "child binding gap", status: "warning", provenance: { flow_id: "flow-1" } },
     ],
     edges: [
       { id: "edge-1", from: "e2", to: "e3", type: "spawn", label: "accepted" },
       { id: "edge-2", from: "e3", to: "e5", type: "taskflow", label: "gap" },
     ],
-    diagnostics: [{ id: "d1", severity: "warning", type: "taskflow_childruns_empty", message: "TaskFlow childRuns empty after accepted child", eventId: "e5" }],
+    diagnostics: [{ id: "d1", severity: "warning", type: "taskflow_childruns_empty", message: "Accepted child is missing from managed workflow child references", eventId: "e5" }],
+    validation: {
+      status: "ok",
+      checks: [
+        { id: "lanes.resolve", status: "ok", message: "all event lanes resolve" },
+        { id: "edges.resolve", status: "ok", message: "all edges resolve" },
+      ],
+    },
     runs: [{ runId: "run-12345678", startedAt: "2026-05-23T07:31:00Z", durationMs: 1000, modelSteps: 1, toolSteps: 2, status: "completed" }],
   };
 }
@@ -150,11 +158,17 @@ console.log("\n=== Group 1: renderWorkflowGraph ===");
   const { ctx } = loadAppJs();
   assert(typeof ctx.renderWorkflowGraph === "function", "renderWorkflowGraph exposed on vm global");
   const html = ctx.renderWorkflowGraph(sampleWorkflow());
-  assert(html.includes("workflow-grid"), "renders workflow grid");
-  assert(html.includes("User / Feishu"), "renders user lane");
+  assert(html.includes("workflow-sequence"), "renders sequence diagram view");
+  assert(html.includes("sequence-lane-area"), "renders a dedicated lane drawing area");
+  assert(html.includes("left:10.0000%;width:20.0000%"), "user-to-parent arrow is center-to-center");
+  assert(html.includes("left:calc(30.0000% - 58px);width:116px"), "self-call is centered on parent lane");
+  assert(html.includes("User"), "renders user lane");
   assert(html.includes("OpenClaw Runtime"), "renders runtime lane");
-  assert(html.includes("TaskFlow"), "renders TaskFlow lane");
-  assert(html.includes("spawn accepted"), "renders accepted event");
+  assert(html.includes("Workflow State"), "renders workflow state lane");
+  assert(html.includes("accepted childSessionKey + runId"), "renders accepted return message");
+  assert(html.includes("ctx 12K"), "renders context length metadata");
+  assert(html.includes("1.2s"), "renders call duration metadata");
+  assert(html.includes("workflow-validation wf-ok"), "renders workflow data validation status");
   assert(html.includes("taskflow_childruns_empty"), "renders diagnostics");
   assert(html.includes("childSessionKey"), "detail provenance includes childSessionKey");
   assert(!/mermaid/i.test(html), "does not require Mermaid markup");

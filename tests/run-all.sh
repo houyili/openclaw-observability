@@ -16,6 +16,12 @@
 #                     (workflow-projection.test.ts) — hermetic
 #   workflow-frontend — native HTML/CSS Workflow Graph rendering
 #                     (workflow-frontend.test.ts) — hermetic
+#   session-id-scope — detail queries scoped by runtime session_id
+#                     (session-id-scope.test.ts) — hermetic
+#   env-config      — .env quote parsing parity for TS + shell helpers
+#                     (env-config.test.ts) — hermetic
+#   service-self-check — launchd plist generation and placeholder checks
+#                     (service-self-check.test.ts) — hermetic
 #   watcher-rehome  — transcript-watcher sessionIdToKeyMap TTL refresh +
 #                     raw-UUID re-homing (watcher-rehome.test.ts) — hermetic
 #   token-backfill  — recomputeSessionCounts token backfill from steps
@@ -31,7 +37,7 @@
 #   perf            — wall-clock + CPU budgets for hot paths (perf-bench.ts)
 #
 # Hermetic suites (no live obs-v2 service or live transcripts needed):
-#   unit, invariants, fixture, auth-stale, context-length, cli-commands, frontend-detail, workflow-projection, workflow-frontend, watcher-rehome, token-backfill, parent-child
+#   unit, invariants, fixture, auth-stale, context-length, cli-commands, frontend-detail, workflow-projection, workflow-frontend, session-id-scope, env-config, service-self-check, watcher-rehome, token-backfill, parent-child
 #
 # Live suites (need a running obs-v2 + ~/.openclaw/agents/<agent>/sessions/):
 #   integrity, live-e2e, replay, cross-check, perf
@@ -49,7 +55,7 @@ NODE_BIN="${NODE_BIN:-$HOME/.local/bin/node}"
 [ -x "$NODE_BIN" ] || NODE_BIN="node"
 NODE_FLAGS="--experimental-sqlite --experimental-strip-types --no-warnings"
 
-FILTER="${TEST_FILTER:-unit invariants fixture auth-stale context-length cli-commands frontend-detail workflow-projection workflow-frontend watcher-rehome token-backfill parent-child integrity live-e2e replay cross-check perf}"
+FILTER="${TEST_FILTER:-unit invariants fixture auth-stale context-length cli-commands frontend-detail workflow-projection workflow-frontend session-id-scope env-config service-self-check watcher-rehome token-backfill parent-child integrity live-e2e replay cross-check perf}"
 
 total_fail=0
 run_suite() {
@@ -79,6 +85,9 @@ run_suite "cli-commands"    "tests/cli-commands.test.ts"
 run_suite "frontend-detail" "tests/frontend-detail-view.test.ts"
 run_suite "workflow-projection" "tests/workflow-projection.test.ts"
 run_suite "workflow-frontend" "tests/workflow-frontend.test.ts"
+run_suite "session-id-scope" "tests/session-id-scope.test.ts"
+run_suite "env-config"     "tests/env-config.test.ts"
+run_suite "service-self-check" "tests/service-self-check.test.ts"
 run_suite "watcher-rehome"  "tests/watcher-rehome.test.ts"
 run_suite "token-backfill"  "tests/token-backfill.test.ts"
 run_suite "parent-child"   "tests/parent-child.test.ts"

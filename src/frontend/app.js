@@ -13,7 +13,9 @@ let currentTab = 'sessions';
 let currentSubTab = 'sessions'; // 'sessions' (non-cron) or 'cron'
 let currentPage = 1;
 let expandedSessionKey = null;
+let expandedSessionId = null;
 let selectedRunId = null; // null = latest run
+let showAllRuns = false;
 
 // ─── Tab switching ──────────────────────────────────────────────
 document.querySelectorAll('button.tab').forEach(btn => {
@@ -239,8 +241,8 @@ async function refreshSessions() {
     const lr = s.latestRun;
     const blockerText = s.blocker || '-';
     const blockDur = s.lastBlockDurationMs ? fmtDur(s.lastBlockDurationMs) : '';
-    return `<tr data-key="${esc(s.sessionKey)}">
-      <td><button class="expand-btn" onclick="toggleSession('${esc(s.sessionKey)}')">&#9654;</button></td>
+    return `<tr data-key="${esc(s.sessionKey)}" data-session-id="${esc(s.sessionId || '')}">
+      <td><button class="expand-btn" onclick="toggleSession('${esc(s.sessionKey)}','${esc(s.sessionId || '')}')">&#9654;</button></td>
       <td>${esc(s.agentId)}</td>
       <td class="mono"><div class="key-cell" title="${esc(s.sessionKey)}"><span class="key-text">${esc(keyShort)}</span><button class="copy-btn" data-key="${esc(s.sessionKey)}" onclick="event.stopPropagation();copyText(this.dataset.key,this)">copy</button></div></td>
       <td class="mono text-sm" title="${esc(s.sessionId || '')}">${esc((s.sessionId || '').slice(0, 8))}</td>
@@ -277,36 +279,49 @@ async function refreshSessions() {
     ` : `<span class="page-info">${data.total} sessions</span>`;
   }
 
-  if (expandedSessionKey) refreshDetail(expandedSessionKey);
+  if (expandedSessionKey) refreshDetail(expandedSessionKey, expandedSessionId);
 }
 
-window.toggleSession = async function(key) {
+window.toggleSession = async function(key, sessionId) {
   const detail = document.getElementById('session-detail');
-  if (expandedSessionKey === key) {
+  sessionId = sessionId || null;
+  if (expandedSessionKey === key && expandedSessionId === sessionId) {
     expandedSessionKey = null;
+    expandedSessionId = null;
     selectedRunId = null;
+    showAllRuns = false;
     detail.classList.add('hidden');
     return;
   }
   expandedSessionKey = key;
+  expandedSessionId = sessionId;
   selectedRunId = null;
+  showAllRuns = false;
   detail.classList.remove('hidden');
-  await refreshDetail(key);
+  await refreshDetail(key, sessionId);
 };
 
 window.selectRun = function(runId) {
   selectedRunId = runId || null;
-  if (expandedSessionKey) refreshDetail(expandedSessionKey);
+  if (expandedSessionKey) refreshDetail(expandedSessionKey, expandedSessionId);
+};
+
+window.toggleRunSelector = function() {
+  showAllRuns = !showAllRuns;
+  if (expandedSessionKey) refreshDetail(expandedSessionKey, expandedSessionId);
 };
 
 // Stacked detail: Workflow Graph + Workflow trace + Context length, refreshed together.
-async function refreshDetail(key) {
+async function refreshDetail(key, sessionId) {
   const detail = document.getElementById('session-detail');
-  const runParam = selectedRunId ? `&runId=${encodeURIComponent(selectedRunId)}` : '';
+  const params = new URLSearchParams();
+  if (selectedRunId) params.set('runId', selectedRunId);
+  if (sessionId) params.set('sessionId', sessionId);
+  const query = params.toString();
   const [workflowRes, traceRes, ctxRes] = await Promise.all([
-    authFetch(`/api/sessions/${encodeURIComponent(key)}/workflow?${runParam}`).catch(() => null),
-    authFetch(`/api/sessions/${encodeURIComponent(key)}/trace?${runParam}`).catch(() => null),
-    authFetch(`/api/sessions/${encodeURIComponent(key)}/context?${runParam}`).catch(() => null),
+    authFetch(`/api/sessions/${encodeURIComponent(key)}/workflow?${query}`).catch(() => null),
+    authFetch(`/api/sessions/${encodeURIComponent(key)}/trace?${query}`).catch(() => null),
+    authFetch(`/api/sessions/${encodeURIComponent(key)}/context?${query}`).catch(() => null),
   ]);
 
   let workflowData = null;
@@ -340,10 +355,20 @@ async function refreshDetail(key) {
 
 function renderRunSelector(runs, activeRunId) {
   if (!runs || runs.length <= 1) return '';
+  const maxCompactRuns = 18;
+  const visibleRuns = showAllRuns ? runs : runs.slice(0, maxCompactRuns);
+  if (!showAllRuns && activeRunId && !visibleRuns.some(r => r.runId === activeRunId)) {
+    const active = runs.find(r => r.runId === activeRunId);
+    if (active) visibleRuns.push(active);
+  }
   let html = '<div class="run-selector">';
-  html += `<span class="run-selector-label">Runs (${runs.length}):</span>`;
+  html += `<div class="run-selector-head"><span class="run-selector-label">Runs ${runs.length}${showAllRuns ? '' : ` · latest ${visibleRuns.length}`}</span>`;
+  if (runs.length > maxCompactRuns) {
+    html += `<button class="run-toggle" onclick="toggleRunSelector()">${showAllRuns ? 'compact' : 'all'}</button>`;
+  }
+  html += '</div>';
   html += '<div class="run-list">';
-  for (const r of runs) {
+  for (const r of visibleRuns) {
     const isActive = r.runId === activeRunId;
     const time = new Date(r.startedAt).toLocaleTimeString();
     const durStr = fmtDur(r.durationMs);
@@ -359,26 +384,27 @@ function renderWorkflowGraph(data) {
   const events = data.events || [];
   const edges = data.edges || [];
   const diagnostics = data.diagnostics || [];
+  const validation = data.validation || null;
   if (!events.length) return '<div class="trace-header">No workflow events for this run</div>';
 
-  const laneIds = lanes.map(l => l.id);
-  const byLane = new Map(laneIds.map(id => [id, []]));
-  for (const e of events) {
-    if (!byLane.has(e.laneId)) byLane.set(e.laneId, []);
-    byLane.get(e.laneId).push(e);
-  }
-  const outEdges = new Map();
-  for (const edge of edges) {
-    if (!outEdges.has(edge.from)) outEdges.set(edge.from, []);
-    outEdges.get(edge.from).push(edge);
-  }
-
-  let html = `<div class="workflow-view" style="--wf-lanes:${Math.max(1, laneIds.length)}">`;
+  const laneIndex = new Map(lanes.map((lane, i) => [lane.id, i]));
+  const validationStatus = validation?.status || 'unknown';
+  const validationChecks = validation?.checks || [];
+  const validationBad = validationChecks.filter(c => c.status && c.status !== 'ok');
+  let html = `<div class="workflow-view" style="--wf-lanes:${Math.max(1, lanes.length)}">`;
   html += `<div class="trace-header">
     <strong>Run:</strong> ${esc((data.runId || '').slice(0,8) || 'latest')} &middot;
     <strong>Events:</strong> ${events.length} &middot;
-    <strong>Edges:</strong> ${edges.length}
+    <strong>Edges:</strong> ${edges.length} &middot;
+    <strong>Data:</strong> <span class="workflow-validation wf-${esc(validationStatus)}">${esc(validationStatus)}${validationBad.length ? ` ${validationBad.length}` : ''}</span>
   </div>`;
+  if (validationBad.length) {
+    html += '<div class="workflow-diagnostics">';
+    for (const c of validationBad) {
+      html += `<div class="workflow-diagnostic wf-${esc(c.status)}">validation ${esc(c.id)}: ${esc(c.message)}</div>`;
+    }
+    html += '</div>';
+  }
   if (diagnostics.length) {
     html += '<div class="workflow-diagnostics">';
     for (const d of diagnostics) {
@@ -386,33 +412,109 @@ function renderWorkflowGraph(data) {
     }
     html += '</div>';
   }
-  html += '<div class="workflow-grid">';
+
+  html += '<div class="workflow-sequence">';
+  html += '<div class="sequence-head">';
+  html += '<div class="sequence-time-head"></div>';
+  html += '<div class="sequence-lane-area sequence-participants">';
   for (const lane of lanes) {
-    html += `<div class="workflow-lane workflow-lane-${esc(lane.kind)}">
-      <div class="workflow-lane-title">${esc(lane.title)}</div>`;
-    const laneEvents = byLane.get(lane.id) || [];
-    for (const e of laneEvents) {
-      const detailId = 'wf-detail-' + e.id.replace(/[^a-z0-9]/gi, '_');
-      const outgoing = outEdges.get(e.id) || [];
-      html += `<div class="workflow-event wf-type-${esc(e.type)}${e.status === 'warning' ? ' wf-event-warning' : ''}" onclick="toggleWorkflowDetail('${detailId}')">
-        <div class="workflow-event-time">${e.ts ? esc(new Date(e.ts).toLocaleTimeString()) : '-'}</div>
-        <div class="workflow-event-title">${esc(e.title)}</div>
-        ${e.subtitle ? `<div class="workflow-event-subtitle">${esc(e.subtitle)}</div>` : ''}
-        <div class="workflow-event-type">${esc(e.type)}</div>
-        ${outgoing.length ? `<div class="workflow-edges">${outgoing.map(edge => `<span>${esc(edge.label || edge.type)} -> ${esc(edge.to)}</span>`).join('')}</div>` : ''}
-      </div>`;
-      html += `<div id="${detailId}" class="workflow-detail hidden">`;
-      const prov = e.provenance || {};
-      for (const [k, v] of Object.entries(prov)) {
-        if (v == null || v === '') continue;
-        html += `<div class="detail-row"><span class="detail-label">${esc(k)}:</span> <code>${esc(String(v))}</code></div>`;
+    html += `<div class="sequence-participant sequence-${esc(lane.kind)}">${esc(lane.title)}</div>`;
+  }
+  html += '</div></div>';
+
+  for (const e of events) {
+    const msg = workflowMessageForEvent(e, laneIndex);
+    const detailId = 'wf-detail-' + e.id.replace(/[^a-z0-9]/gi, '_');
+    html += '<div class="sequence-row">';
+    html += `<div class="sequence-time">${e.ts ? esc(new Date(e.ts).toLocaleTimeString()) : '-'}</div>`;
+    html += '<div class="sequence-lane-area">';
+    for (const lane of lanes) html += `<div class="sequence-cell" data-lane="${esc(lane.id)}"></div>`;
+    if (msg) {
+      const fromIdx = laneIndex.get(msg.from);
+      const toIdx = laneIndex.get(msg.to);
+      if (fromIdx != null && toIdx != null) {
+        const fromCenter = laneCenterPct(fromIdx, lanes.length);
+        const toCenter = laneCenterPct(toIdx, lanes.length);
+        const left = Math.min(fromCenter, toCenter);
+        const width = Math.max(0.01, Math.abs(toCenter - fromCenter));
+        const dir = fromIdx === toIdx ? 'self' : fromIdx < toIdx ? 'forward' : 'reverse';
+        const posStyle = dir === 'self'
+          ? `left:calc(${fromCenter.toFixed(4)}% - 58px);width:116px;`
+          : `left:${left.toFixed(4)}%;width:${width.toFixed(4)}%;`;
+        html += `<button class="sequence-message wf-type-${esc(e.type)} sequence-${dir}${e.status === 'warning' ? ' wf-event-warning' : ''}" style="${posStyle}" onclick="toggleWorkflowDetail('${detailId}')">
+          <span class="sequence-line"></span>
+          <span class="sequence-label">
+            <span class="sequence-title">${esc(msg.label)}</span>
+            ${msg.subtitle ? `<span class="sequence-subtitle">${esc(msg.subtitle)}</span>` : ''}
+            <span class="sequence-meta">${esc(workflowEventMeta(e))}</span>
+          </span>
+        </button>`;
       }
-      html += '</div>';
+    }
+    html += '</div></div>';
+    html += `<div id="${detailId}" class="workflow-detail sequence-detail hidden">`;
+    const prov = e.provenance || {};
+    for (const [k, v] of Object.entries(prov)) {
+      if (v == null || v === '') continue;
+      html += `<div class="detail-row"><span class="detail-label">${esc(k)}:</span> <code>${esc(String(v))}</code></div>`;
     }
     html += '</div>';
   }
+
   html += '</div></div>';
   return html;
+}
+
+function laneCenterPct(index, laneCount) {
+  return ((index + 0.5) / Math.max(1, laneCount)) * 100;
+}
+
+function workflowMessageForEvent(e, laneIndex) {
+  const childLane = e.laneId && e.laneId.startsWith('child:') ? e.laneId : null;
+  const childName = childLane ? 'child' : '';
+  switch (e.type) {
+    case 'user_message':
+      return { from: 'user', to: 'parent', label: e.title || 'user message', subtitle: e.subtitle };
+    case 'skill_or_source_step':
+    case 'checkpoint_write':
+      return { from: 'parent', to: 'parent', label: e.title || e.type, subtitle: e.subtitle };
+    case 'sessions_spawn_requested':
+      return { from: 'parent', to: 'runtime', label: e.title || 'sessions_spawn', subtitle: e.subtitle };
+    case 'sessions_spawn_accepted':
+      return { from: 'runtime', to: 'parent', label: 'accepted childSessionKey + runId', subtitle: e.subtitle };
+    case 'sessions_yield':
+      return { from: 'parent', to: 'runtime', label: 'sessions_yield', subtitle: e.subtitle };
+    case 'child_started':
+      return { from: 'runtime', to: childLane || e.laneId, label: 'create child session', subtitle: e.subtitle };
+    case 'child_artifact_written':
+      return { from: childLane || e.laneId, to: childLane || e.laneId, label: e.title || 'write artifact', subtitle: e.subtitle };
+    case 'child_final':
+      return { from: childLane || e.laneId, to: 'runtime', label: `${childName} final answer`, subtitle: e.subtitle };
+    case 'parent_resumed':
+      return { from: 'runtime', to: 'parent', label: 'auto-resume parent', subtitle: e.subtitle };
+    case 'taskflow_plan_snapshot':
+      return { from: 'taskflow', to: 'taskflow', label: 'workflow snapshot', subtitle: e.subtitle };
+    case 'taskflow_child_bound':
+      return { from: 'runtime', to: 'taskflow', label: 'workflow child bound', subtitle: e.subtitle };
+    case 'taskflow_gap':
+      return { from: 'runtime', to: 'taskflow', label: e.title || 'workflow gap', subtitle: e.subtitle };
+    default:
+      if (laneIndex.has(e.laneId)) return { from: e.laneId, to: e.laneId, label: e.title || e.type, subtitle: e.subtitle };
+      return null;
+  }
+}
+
+function workflowEventMeta(e) {
+  const p = e.provenance || {};
+  const parts = [];
+  if (p.duration_ms != null) parts.push(fmtMs(Number(p.duration_ms)));
+  const ctx = Number(p.input_tokens || 0) + Number(p.cache_read_tokens || 0);
+  if (ctx > 0) parts.push(`ctx ${fmtTok(ctx)}`);
+  if (p.input_tokens != null) parts.push(`in ${fmtTok(Number(p.input_tokens))}`);
+  if (p.cache_read_tokens != null) parts.push(`cache ${fmtTok(Number(p.cache_read_tokens))}`);
+  if (p.output_tokens != null) parts.push(`out ${fmtTok(Number(p.output_tokens))}`);
+  if (p.total_tokens != null) parts.push(`total ${fmtTok(Number(p.total_tokens))}`);
+  return parts.length ? parts.join(' · ') : e.type;
 }
 
 window.toggleWorkflowDetail = function(id) {

@@ -1,4 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { getEnvValue } from "../env.ts";
 import { getDb } from "./db.ts";
 import { getRunList } from "./steps-repo.ts";
 
@@ -51,9 +53,22 @@ export interface WorkflowDiagnostic {
   eventId?: string;
 }
 
+export interface WorkflowValidationCheck {
+  id: string;
+  status: "ok" | "warning" | "error";
+  message: string;
+  eventId?: string;
+}
+
+export interface WorkflowValidation {
+  status: "ok" | "warning" | "error";
+  checks: WorkflowValidationCheck[];
+}
+
 interface StepRow {
   step_id: string;
   session_key: string;
+  session_id: string | null;
   run_id: string;
   seq: number;
   ts: string;
@@ -62,6 +77,11 @@ interface StepRow {
   node_type: string;
   tool_name: string | null;
   status: string | null;
+  duration_ms: number | null;
+  total_tokens: number | null;
+  input_tokens: number | null;
+  cache_read_tokens: number | null;
+  output_tokens: number | null;
   input_preview: string | null;
   result_preview: string | null;
   error_text: string | null;
@@ -74,13 +94,27 @@ interface SpawnAccepted {
   mode: string | null;
 }
 
-interface TaskFlowSnapshot {
+interface WorkflowStateSnapshot {
+  adapterId: string;
   flowId: string | null;
   workKey: string | null;
   currentStep: string | null;
   childRefs: string[];
   sourcePath: string;
 }
+
+const WORKFLOW_STATE_ADAPTERS = [
+  {
+    id: "openclaw-managed-workflow",
+    start: "<!-- openclaw-workflow:start -->",
+    end: "<!-- openclaw-workflow:end -->",
+  },
+  {
+    id: "legacy-taskflow",
+    start: `<!-- ${["researcher", "orchestrator"].join("-")}:start -->`,
+    end: `<!-- ${["researcher", "orchestrator"].join("-")}:end -->`,
+  },
+];
 
 const BASE_KEY_RE = /:run:[a-f0-9-]+$/;
 
@@ -154,7 +188,45 @@ function eventLabelForStep(step: StepRow): string {
   return step.node_type.toLowerCase();
 }
 
-function taskFlowFromWorkStatus(parentSteps: StepRow[], childSteps: StepRow[]): TaskFlowSnapshot | null {
+function stepProvenance(step: StepRow, scopeSteps: StepRow[] = []): Record<string, string | number | null> {
+  const contextStep = [...scopeSteps]
+    .reverse()
+    .find(s => s.run_id === step.run_id && s.seq <= step.seq && (s.input_tokens != null || s.cache_read_tokens != null));
+  return {
+    step_id: step.step_id,
+    run_id: step.run_id,
+    session_key: step.session_key,
+    tool_name: step.tool_name,
+    duration_ms: step.duration_ms,
+    total_tokens: step.total_tokens ?? contextStep?.total_tokens ?? null,
+    input_tokens: step.input_tokens ?? contextStep?.input_tokens ?? null,
+    cache_read_tokens: step.cache_read_tokens ?? contextStep?.cache_read_tokens ?? null,
+    output_tokens: step.output_tokens,
+  };
+}
+
+function enabledWorkflowAdapterIds(): Set<string> | null {
+  const envPath = join(import.meta.dirname, "..", "..", ".env");
+  const raw = getEnvValue("OBS_WORKFLOW_ADAPTERS", envPath)?.trim();
+  if (!raw || raw === "auto") return null;
+  if (raw === "none") return new Set();
+  return new Set(raw.split(",").map(s => s.trim()).filter(Boolean));
+}
+
+function extractManagedWorkflowBlock(raw: string): { adapterId: string; body: string } | null {
+  const enabled = enabledWorkflowAdapterIds();
+  for (const adapter of WORKFLOW_STATE_ADAPTERS) {
+    if (enabled && !enabled.has(adapter.id)) continue;
+    const start = raw.indexOf(adapter.start);
+    const end = start >= 0 ? raw.indexOf(adapter.end, start + adapter.start.length) : -1;
+    if (start >= 0 && end >= 0) {
+      return { adapterId: adapter.id, body: raw.slice(start + adapter.start.length, end) };
+    }
+  }
+  return null;
+}
+
+function workflowStateFromArtifacts(parentSteps: StepRow[], childSteps: StepRow[]): WorkflowStateSnapshot | null {
   const paths = new Set<string>();
   for (const step of [...parentSteps, ...childSteps]) {
     for (const p of artifactPaths(`${step.input_preview || ""} ${step.result_preview || ""}`)) {
@@ -166,9 +238,9 @@ function taskFlowFromWorkStatus(parentSteps: StepRow[], childSteps: StepRow[]): 
     if (!existsSync(path)) continue;
     let raw = "";
     try { raw = readFileSync(path, "utf-8"); } catch { continue; }
-    const block = raw.match(/<!-- researcher-orchestrator:start -->([\s\S]*?)<!-- researcher-orchestrator:end -->/);
+    const block = extractManagedWorkflowBlock(raw);
     if (!block) continue;
-    const body = block[1];
+    const body = block.body;
     const flowId = body.match(/\bflow_id:\s*([^\n]+)/)?.[1]?.trim() || null;
     const workKey = body.match(/\bwork_key:\s*([^\n]+)/)?.[1]?.trim() || null;
     const currentStep = body.match(/\bcurrent_step:\s*([^\n]+)/)?.[1]?.trim() || null;
@@ -176,12 +248,12 @@ function taskFlowFromWorkStatus(parentSteps: StepRow[], childSteps: StepRow[]): 
     for (const line of body.split("\n")) {
       if (/child|run|session|waiting/i.test(line)) childRefs.push(line.trim());
     }
-    return { flowId, workKey, currentStep, childRefs, sourcePath: path };
+    return { adapterId: block.adapterId, flowId, workKey, currentStep, childRefs, sourcePath: path };
   }
   return null;
 }
 
-function childMatchesTaskFlow(child: SpawnAccepted, snapshot: TaskFlowSnapshot | null): boolean {
+function childMatchesWorkflowState(child: SpawnAccepted, snapshot: WorkflowStateSnapshot | null): boolean {
   if (!snapshot) return false;
   const haystack = snapshot.childRefs.join("\n");
   return !!(
@@ -190,18 +262,162 @@ function childMatchesTaskFlow(child: SpawnAccepted, snapshot: TaskFlowSnapshot |
   );
 }
 
-export function getWorkflowGraph(sessionKey: string, runId?: string): {
+function eventOrderRank(type: WorkflowEventType): number {
+  const ranks: Record<WorkflowEventType, number> = {
+    user_message: 0,
+    skill_or_source_step: 1,
+    checkpoint_write: 1,
+    sessions_spawn_requested: 2,
+    sessions_spawn_accepted: 3,
+    sessions_yield: 4,
+    child_started: 5,
+    child_artifact_written: 6,
+    child_final: 7,
+    parent_resumed: 8,
+    taskflow_plan_snapshot: 9,
+    taskflow_child_bound: 10,
+    taskflow_gap: 11,
+  };
+  return ranks[type] ?? 99;
+}
+
+function validationStatus(checks: WorkflowValidationCheck[]): WorkflowValidation["status"] {
+  if (checks.some(c => c.status === "error")) return "error";
+  if (checks.some(c => c.status === "warning")) return "warning";
+  return "ok";
+}
+
+function validateWorkflowGraph(params: {
+  sessionId?: string | null;
+  parentKey: string;
+  activeRunId: string | null;
+  lanes: WorkflowLane[];
+  events: WorkflowEvent[];
+  edges: WorkflowEdge[];
+  parentSteps: StepRow[];
+  childStepMap: Map<string, StepRow[]>;
+  spawnAccepts: Array<{ requested: WorkflowEvent; accepted?: WorkflowEvent; acceptedData: SpawnAccepted; step: StepRow }>;
+}): WorkflowValidation {
+  const checks: WorkflowValidationCheck[] = [];
+  const laneIds = new Set(params.lanes.map(l => l.id));
+  const eventById = new Map(params.events.map(e => [e.id, e]));
+  const sourceSteps = new Map<string, StepRow>();
+  for (const step of params.parentSteps) sourceSteps.set(step.step_id, step);
+  for (const rows of params.childStepMap.values()) {
+    for (const step of rows) sourceSteps.set(step.step_id, step);
+  }
+  const acceptedChildKeys = new Set(
+    params.spawnAccepts
+      .map(s => s.acceptedData.childSessionKey ? baseKey(s.acceptedData.childSessionKey) : null)
+      .filter(Boolean) as string[],
+  );
+  const acceptedChildRuns = new Map<string, Set<string>>();
+  for (const spawn of params.spawnAccepts) {
+    if (!spawn.acceptedData.childSessionKey || !spawn.acceptedData.runId) continue;
+    const key = baseKey(spawn.acceptedData.childSessionKey);
+    if (!acceptedChildRuns.has(key)) acceptedChildRuns.set(key, new Set());
+    acceptedChildRuns.get(key)?.add(spawn.acceptedData.runId);
+  }
+
+  const add = (id: string, status: WorkflowValidationCheck["status"], message: string, eventId?: string) => {
+    checks.push({ id, status, message, eventId });
+  };
+
+  const badLane = params.events.find(e => !laneIds.has(e.laneId));
+  add("lanes.resolve", badLane ? "error" : "ok", badLane ? `event ${badLane.id} references missing lane ${badLane.laneId}` : "all event lanes resolve", badLane?.id);
+
+  const badEdge = params.edges.find(e => !eventById.has(e.from) || !eventById.has(e.to));
+  add("edges.resolve", badEdge ? "error" : "ok", badEdge ? `edge ${badEdge.id} references missing event` : "all edges resolve");
+
+  const reversedEdge = params.edges.find(edge => {
+    const from = eventById.get(edge.from);
+    const to = eventById.get(edge.to);
+    return !!(from && to && to.tsEpochMs + 1 < from.tsEpochMs);
+  });
+  add("edges.time", reversedEdge ? "error" : "ok", reversedEdge ? `edge ${reversedEdge.id} points backward in time` : "all causal edges are time-consistent");
+
+  const badStepEvent = params.events.find(e => {
+    const stepId = e.provenance?.step_id;
+    if (typeof stepId !== "string") return false;
+    return !sourceSteps.has(stepId);
+  });
+  add("provenance.step_id", badStepEvent ? "error" : "ok", badStepEvent ? `event ${badStepEvent.id} has unknown step_id` : "all step_id provenance resolves", badStepEvent?.id);
+
+  if (params.sessionId) {
+    const badSessionStep = params.parentSteps.find(s => s.session_id !== params.sessionId);
+    add(
+      "scope.session_id",
+      badSessionStep ? "error" : "ok",
+      badSessionStep ? `parent step ${badSessionStep.step_id} escaped session_id scope` : "parent steps are scoped by session_id",
+    );
+  } else {
+    add("scope.session_key", "ok", "parent steps are scoped by session_key");
+  }
+
+  const badRunStep = params.activeRunId
+    ? params.parentSteps.find(s => s.run_id !== params.activeRunId)
+    : null;
+  add("scope.run_id", badRunStep ? "error" : "ok", badRunStep ? `parent step ${badRunStep.step_id} escaped run_id scope` : "parent steps are scoped by run_id");
+
+  const badChildLane = params.lanes.find(l => l.id.startsWith("child:") && !acceptedChildKeys.has(l.id.slice("child:".length)));
+  add("spawn.child_lanes", badChildLane ? "error" : "ok", badChildLane ? `child lane ${badChildLane.id} has no accepted spawn` : "child lanes come from accepted spawn results");
+
+  const acceptedWithoutRows = [...acceptedChildKeys].find(childKey => (params.childStepMap.get(childKey)?.length || 0) === 0);
+  add(
+    "spawn.child_steps",
+    acceptedWithoutRows ? "warning" : "ok",
+    acceptedWithoutRows ? `accepted child ${shortKey(acceptedWithoutRows)} has no visible steps` : "accepted children have visible step rows",
+  );
+
+  let badChildRun: { childKey: string; step: StepRow } | null = null;
+  for (const [childKey, rows] of params.childStepMap.entries()) {
+    const allowedRuns = acceptedChildRuns.get(childKey);
+    if (!allowedRuns || allowedRuns.size === 0) continue;
+    const bad = rows.find(s => !allowedRuns.has(s.run_id));
+    if (bad) {
+      badChildRun = { childKey, step: bad };
+      break;
+    }
+  }
+  add(
+    "spawn.child_run_id",
+    badChildRun ? "error" : "ok",
+    badChildRun ? `child ${shortKey(badChildRun.childKey)} includes unaccepted run ${badChildRun.step.run_id}` : "child steps match accepted child run_id",
+  );
+
+  const spawnRequested = params.events.filter(e => e.type === "sessions_spawn_requested").length;
+  const spawnAccepted = params.events.filter(e => e.type === "sessions_spawn_accepted").length;
+  add(
+    "spawn.acceptance",
+    spawnAccepted > spawnRequested ? "error" : "ok",
+    spawnAccepted > spawnRequested ? "more spawn accepted events than requests" : "spawn acceptance count is bounded by requests",
+  );
+
+  const badResume = params.edges.find(edge => {
+    if (edge.type !== "resume") return false;
+    const from = eventById.get(edge.from);
+    const to = eventById.get(edge.to);
+    return !(from?.type === "child_final" && to?.type === "parent_resumed" && to.tsEpochMs >= from.tsEpochMs);
+  });
+  add("resume.order", badResume ? "error" : "ok", badResume ? `resume edge ${badResume.id} is not child_final -> parent_resumed` : "resume edges follow child_final -> parent_resumed");
+
+  return { status: validationStatus(checks), checks };
+}
+
+export function getWorkflowGraph(sessionKey: string, runId?: string, sessionId?: string | null): {
   sessionKey: string;
+  sessionId: string | null;
   runId: string | null;
   lanes: WorkflowLane[];
   events: WorkflowEvent[];
   edges: WorkflowEdge[];
   diagnostics: WorkflowDiagnostic[];
+  validation: WorkflowValidation;
   runs: any[];
 } {
   const db = getDb();
   const parentKey = baseKey(sessionKey);
-  const runs = getRunList(parentKey).map(r => ({
+  const runs = getRunList(parentKey, sessionId).map(r => ({
     runId: r.run_id,
     startedAt: r.started_at,
     durationMs: r.duration_ms,
@@ -211,20 +427,48 @@ export function getWorkflowGraph(sessionKey: string, runId?: string): {
   }));
   const activeRunId = runId || runs[0]?.runId || null;
 
-  const parentSteps = db.prepare(`
+  const parentWhereCol = sessionId ? "session_id" : "session_key";
+  const parentWhereVal = sessionId || parentKey;
+  let parentSteps = db.prepare(`
     SELECT * FROM steps
-    WHERE session_key = ? ${activeRunId ? "AND run_id = ?" : ""}
+    WHERE ${parentWhereCol} = ? ${activeRunId ? "AND run_id = ?" : ""}
     ORDER BY ts_epoch_ms, seq
-  `).all(...(activeRunId ? [parentKey, activeRunId] : [parentKey])) as StepRow[];
+  `).all(...(activeRunId ? [parentWhereVal, activeRunId] : [parentWhereVal])) as StepRow[];
 
   const events: WorkflowEvent[] = [];
   const edges: WorkflowEdge[] = [];
   const diagnostics: WorkflowDiagnostic[] = [];
   const lanes: WorkflowLane[] = [
-    { id: "user", title: "User / Feishu", kind: "user" },
-    { id: "parent", title: "Parent Researcher", kind: "parent" },
+    { id: "user", title: "User", kind: "user" },
+    { id: "parent", title: "Parent Session", kind: "parent" },
     { id: "runtime", title: "OpenClaw Runtime", kind: "runtime" },
   ];
+
+  if (parentSteps.length === 0) {
+    const emptyLanes = [...lanes, { id: "taskflow", title: "Workflow State", kind: "taskflow" } as WorkflowLane];
+    const validation = validateWorkflowGraph({
+      sessionId,
+      parentKey,
+      activeRunId,
+      lanes: emptyLanes,
+      events,
+      edges,
+      parentSteps,
+      childStepMap: new Map(),
+      spawnAccepts: [],
+    });
+    return {
+      sessionKey: parentKey,
+      sessionId: sessionId || null,
+      runId: activeRunId,
+      lanes: emptyLanes,
+      events,
+      edges,
+      diagnostics,
+      validation,
+      runs,
+    };
+  }
 
   const firstTs = parentSteps[0]?.ts_epoch_ms || Date.now();
   const firstIso = parentSteps[0]?.ts || new Date(firstTs).toISOString();
@@ -242,12 +486,7 @@ export function getWorkflowGraph(sessionKey: string, runId?: string): {
   let previousParentEvent: WorkflowEvent | undefined = userEvent;
 
   for (const step of parentSteps) {
-    const provenance = {
-      step_id: step.step_id,
-      run_id: step.run_id,
-      session_key: step.session_key,
-      tool_name: step.tool_name,
-    };
+    const provenance = stepProvenance(step, parentSteps);
     if (step.tool_name === "sessions_spawn" || step.node_type === "SUBAGENT_SPAWN") {
       const requested = addEvent(events, {
         laneId: "parent",
@@ -341,18 +580,11 @@ export function getWorkflowGraph(sessionKey: string, runId?: string): {
     }
   }
 
-  const sessionRows = db.prepare(`
-    SELECT session_key, session_id, label, parent_session_key, parent_session_id
-    FROM sessions
-    WHERE parent_session_key = ?
-       OR parent_session_id IN (SELECT session_id FROM sessions WHERE session_key = ?)
-  `).all(parentKey, parentKey) as Array<{ session_key: string; session_id: string | null; label: string | null }>;
-
   const childKeys = new Set<string>();
   for (const s of spawnAccepts) if (s.acceptedData.childSessionKey) childKeys.add(baseKey(s.acceptedData.childSessionKey));
-  for (const row of sessionRows) if (row.session_key) childKeys.add(baseKey(row.session_key));
 
   const childStepMap = new Map<string, StepRow[]>();
+  const resumeEventsByStepId = new Map<string, WorkflowEvent>();
   for (const childKey of childKeys) {
     lanes.push({ id: `child:${childKey}`, title: `Child ${shortKey(childKey)}`, kind: "child" });
     const childRunIds = spawnAccepts
@@ -378,7 +610,7 @@ export function getWorkflowGraph(sessionKey: string, runId?: string): {
       tsEpochMs: first.ts_epoch_ms,
       title: "child started",
       subtitle: shortKey(childKey),
-      provenance: { step_id: first.step_id, run_id: first.run_id, childSessionKey: childKey },
+      provenance: { ...stepProvenance(first, rows), childSessionKey: childKey },
     });
     const accepted = spawnAccepts.find(s => s.acceptedData.childSessionKey && baseKey(s.acceptedData.childSessionKey) === childKey)?.accepted;
     addEdge(edges, accepted, started, "spawn", "start");
@@ -395,7 +627,7 @@ export function getWorkflowGraph(sessionKey: string, runId?: string): {
         title: eventLabelForStep(step),
         subtitle: paths[0],
         status: step.status || undefined,
-        provenance: { step_id: step.step_id, run_id: step.run_id, childSessionKey: childKey, artifact_path: paths[0] },
+        provenance: { ...stepProvenance(step, rows), childSessionKey: childKey, artifact_path: paths[0] },
       }), "causal");
     }
 
@@ -408,21 +640,25 @@ export function getWorkflowGraph(sessionKey: string, runId?: string): {
       title: "child final",
       subtitle: finalStep.result_preview?.slice(0, 120) || finalStep.input_preview?.slice(0, 120) || undefined,
       status: finalStep.status || undefined,
-      provenance: { step_id: finalStep.step_id, run_id: finalStep.run_id, childSessionKey: childKey },
+      provenance: { ...stepProvenance(finalStep, rows), childSessionKey: childKey },
     });
     addEdge(edges, started, final, "causal");
 
     const resumedStep = parentSteps.find(s => s.ts_epoch_ms > finalStep.ts_epoch_ms);
     if (resumedStep) {
-      const resumed = addEvent(events, {
-        laneId: "parent",
-        type: "parent_resumed",
-        ts: resumedStep.ts,
-        tsEpochMs: resumedStep.ts_epoch_ms + 1,
-        title: "parent resumed",
-        subtitle: eventLabelForStep(resumedStep),
-        provenance: { step_id: resumedStep.step_id, run_id: resumedStep.run_id, childSessionKey: childKey },
-      });
+      let resumed = resumeEventsByStepId.get(resumedStep.step_id);
+      if (!resumed) {
+        resumed = addEvent(events, {
+          laneId: "parent",
+          type: "parent_resumed",
+          ts: resumedStep.ts,
+          tsEpochMs: resumedStep.ts_epoch_ms + 1,
+          title: "parent resumed",
+          subtitle: eventLabelForStep(resumedStep),
+          provenance: { ...stepProvenance(resumedStep, parentSteps), childSessionKey: childKey },
+        });
+        resumeEventsByStepId.set(resumedStep.step_id, resumed);
+      }
       addEdge(edges, final, resumed, "resume", "resume");
     } else {
       diagnostics.push({
@@ -435,9 +671,9 @@ export function getWorkflowGraph(sessionKey: string, runId?: string): {
     }
   }
 
-  lanes.push({ id: "taskflow", title: "TaskFlow", kind: "taskflow" });
+  lanes.push({ id: "taskflow", title: "Workflow State", kind: "taskflow" });
   const allChildSteps = [...childStepMap.values()].flat();
-  const taskflow = taskFlowFromWorkStatus(parentSteps, allChildSteps);
+  const taskflow = workflowStateFromArtifacts(parentSteps, allChildSteps);
   const taskTs = (parentSteps.find(s => /work_status\.md/.test(`${s.input_preview || ""} ${s.result_preview || ""}`)) || parentSteps[parentSteps.length - 1])?.ts_epoch_ms || firstTs;
   if (taskflow) {
     const snapshot = addEvent(events, {
@@ -445,16 +681,17 @@ export function getWorkflowGraph(sessionKey: string, runId?: string): {
       type: "taskflow_plan_snapshot",
       ts: new Date(taskTs).toISOString(),
       tsEpochMs: taskTs,
-      title: "plan snapshot",
-      subtitle: taskflow.currentStep || taskflow.flowId || "researcher-orchestrator",
+      title: "workflow snapshot",
+      subtitle: taskflow.currentStep || taskflow.flowId || taskflow.adapterId,
       provenance: {
+        adapter_id: taskflow.adapterId,
         flow_id: taskflow.flowId,
         work_key: taskflow.workKey,
         artifact_path: taskflow.sourcePath,
       },
     });
     for (const spawn of spawnAccepts) {
-      if (childMatchesTaskFlow(spawn.acceptedData, taskflow)) {
+      if (childMatchesWorkflowState(spawn.acceptedData, taskflow)) {
         const bound = addEvent(events, {
           laneId: "taskflow",
           type: "taskflow_child_bound",
@@ -463,6 +700,7 @@ export function getWorkflowGraph(sessionKey: string, runId?: string): {
           title: "child bound",
           subtitle: spawn.acceptedData.taskName || shortKey(spawn.acceptedData.childSessionKey),
           provenance: {
+            adapter_id: taskflow.adapterId,
             flow_id: taskflow.flowId,
             childSessionKey: spawn.acceptedData.childSessionKey,
             child_run_id: spawn.acceptedData.runId,
@@ -476,10 +714,11 @@ export function getWorkflowGraph(sessionKey: string, runId?: string): {
           type: "taskflow_gap",
           ts: spawn.step.ts,
           tsEpochMs: spawn.step.ts_epoch_ms + 2,
-          title: "childRuns gap",
-          subtitle: "accepted child not present in TaskFlow",
+          title: "child binding gap",
+          subtitle: "accepted child not present in workflow state",
           status: "warning",
           provenance: {
+            adapter_id: taskflow.adapterId,
             flow_id: taskflow.flowId,
             childSessionKey: spawn.acceptedData.childSessionKey,
             child_run_id: spawn.acceptedData.runId,
@@ -491,7 +730,7 @@ export function getWorkflowGraph(sessionKey: string, runId?: string): {
           id: `diag-${diagnostics.length + 1}`,
           severity: "warning",
           type: "taskflow_childruns_empty",
-          message: "TaskFlow childRuns empty or missing after accepted child",
+          message: "Accepted child is missing from managed workflow child references",
           eventId: gap.id,
         });
       }
@@ -502,8 +741,8 @@ export function getWorkflowGraph(sessionKey: string, runId?: string): {
       type: "taskflow_gap",
       ts: new Date(taskTs).toISOString(),
       tsEpochMs: taskTs,
-      title: "TaskFlow unavailable",
-      subtitle: "no managed work_status projection",
+      title: "Workflow state unavailable",
+      subtitle: "no managed workflow projection",
       status: spawnAccepts.length ? "warning" : "info",
       provenance: { session_key: parentKey, run_id: activeRunId },
     });
@@ -511,22 +750,50 @@ export function getWorkflowGraph(sessionKey: string, runId?: string): {
       diagnostics.push({
         id: `diag-${diagnostics.length + 1}`,
         severity: "warning",
-        type: "taskflow_unavailable",
-        message: "No researcher-orchestrator managed projection found; child binding cannot be verified",
+        type: "workflow_state_unavailable",
+        message: "No managed workflow projection found; child binding cannot be verified",
         eventId: gap.id,
       });
     }
   }
 
-  events.sort((a, b) => (a.tsEpochMs - b.tsEpochMs) || a.laneId.localeCompare(b.laneId));
+  events.sort((a, b) => (
+    (a.tsEpochMs - b.tsEpochMs) ||
+    (eventOrderRank(a.type) - eventOrderRank(b.type)) ||
+    a.laneId.localeCompare(b.laneId)
+  ));
+
+  const validation = validateWorkflowGraph({
+    sessionId,
+    parentKey,
+    activeRunId,
+    lanes,
+    events,
+    edges,
+    parentSteps,
+    childStepMap,
+    spawnAccepts,
+  });
+  for (const check of validation.checks) {
+    if (check.status === "ok") continue;
+    diagnostics.push({
+      id: `diag-${diagnostics.length + 1}`,
+      severity: check.status,
+      type: `validation_${check.id.replace(/[^a-z0-9]+/gi, "_").toLowerCase()}`,
+      message: check.message,
+      eventId: check.eventId,
+    });
+  }
 
   return {
     sessionKey: parentKey,
+    sessionId: sessionId || null,
     runId: activeRunId,
     lanes,
     events,
     edges,
     diagnostics,
+    validation,
     runs,
   };
 }

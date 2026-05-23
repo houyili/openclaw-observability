@@ -8,8 +8,8 @@
  *      signal. Designed so every number is mechanically derivable from
  *      existing schema fields with no fabrication.
  *
- *   2. getContextTimeline() — fine-grained per-turn analysis modelled
- *      after `agents_design_doc/researcher_design_202604/13_horizon_lm_session_postmortem_20260411.md`.
+ *   2. getContextTimeline() — fine-grained per-turn analysis for finding
+ *      prompt growth, single-turn spikes, and repeated no-progress loops.
  *      Per-turn rows (Δin / cR / out / tool / prevTR_chars), phase
  *      auto-detection, top-N single-point spikes, cumulative aggregates,
  *      death-loop heuristics.
@@ -316,8 +316,8 @@ function getTurnReplyTextChars(t: Turn): number {
 
 // ─── Shared data fetch (single SQL + groupTurns) ───────────────
 
-function fetchAndGroup(sessionKey: string, runId?: string): { rows: RawStep[]; turns: Turn[]; resolvedRunId: string } | null {
-  const rows = getTraceSpans(sessionKey, runId) as unknown as RawStep[];
+function fetchAndGroup(sessionKey: string, runId?: string, sessionId?: string | null): { rows: RawStep[]; turns: Turn[]; resolvedRunId: string } | null {
+  const rows = getTraceSpans(sessionKey, runId, sessionId) as unknown as RawStep[];
   if (rows.length === 0) return null;
   const turns = groupTurns(rows);
   if (turns.length === 0) return null;
@@ -331,8 +331,9 @@ function fetchAndGroup(sessionKey: string, runId?: string): { rows: RawStep[]; t
 export function getContextBoth(
   sessionKey: string,
   runId?: string,
+  sessionId?: string | null,
 ): { breakdown: ContextBreakdown; timeline: ContextTimeline } | null {
-  const data = fetchAndGroup(sessionKey, runId);
+  const data = fetchAndGroup(sessionKey, runId, sessionId);
   if (!data) return null;
   const breakdown = buildBreakdown(sessionKey, data.rows, data.turns, data.resolvedRunId);
   const timeline = buildTimeline(sessionKey, data.rows, data.turns, data.resolvedRunId);
@@ -344,8 +345,9 @@ export function getContextBoth(
 export function getContextBreakdown(
   sessionKey: string,
   runId?: string,
+  sessionId?: string | null,
 ): ContextBreakdown | null {
-  const data = fetchAndGroup(sessionKey, runId);
+  const data = fetchAndGroup(sessionKey, runId, sessionId);
   if (!data) return null;
   return buildBreakdown(sessionKey, data.rows, data.turns, data.resolvedRunId);
 }
@@ -446,8 +448,9 @@ const REPEATED_READ_THRESHOLD = 3;
 export function getContextTimeline(
   sessionKey: string,
   runId?: string,
+  sessionId?: string | null,
 ): ContextTimeline | null {
-  const data = fetchAndGroup(sessionKey, runId);
+  const data = fetchAndGroup(sessionKey, runId, sessionId);
   if (!data) return null;
   return buildTimeline(sessionKey, data.rows, data.turns, data.resolvedRunId);
 }

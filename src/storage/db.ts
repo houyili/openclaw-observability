@@ -63,6 +63,7 @@ function migrate(db: DatabaseSync): void {
     CREATE TABLE IF NOT EXISTS steps (
       step_id             TEXT PRIMARY KEY,
       session_key         TEXT NOT NULL,
+      session_id          TEXT,
       run_id              TEXT NOT NULL,
       parent_step_id      TEXT,
       seq                 INTEGER,
@@ -105,11 +106,13 @@ function migrate(db: DatabaseSync): void {
   ensureColumn(db, "steps", "cache_read_tokens",  "INTEGER");  // usage.cacheRead on MODEL_THINK / REPLY
   ensureColumn(db, "steps", "thinking_text_len",  "INTEGER");  // chars in content[].type='thinking'
   ensureColumn(db, "steps", "reply_text_len",     "INTEGER");  // full chars of REPLY text content
+  ensureColumn(db, "steps", "session_id",         "TEXT");     // transcript/runtime session UUID
 
   // Indexes
   db.exec(`CREATE INDEX IF NOT EXISTS idx_sessions_parent ON sessions(parent_session_key) WHERE parent_session_key IS NOT NULL`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_sessions_parent_sid ON sessions(parent_session_id) WHERE parent_session_id IS NOT NULL`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_steps_session_run ON steps(session_key, run_id, seq)`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_steps_session_id_run ON steps(session_id, run_id, seq) WHERE session_id IS NOT NULL`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_steps_ts ON steps(ts_epoch_ms)`);
   // Covers `WHERE session_key = ? ORDER BY ts_epoch_ms DESC LIMIT 1` which powers
   // recomputeAllSessionOps (hot loop). Without this, the OR-LIKE ancestor query
@@ -137,9 +140,11 @@ function migrate(db: DatabaseSync): void {
       file_path       TEXT PRIMARY KEY,
       byte_offset     INTEGER DEFAULT 0,
       session_key     TEXT,
+      session_id      TEXT,
       updated_at      TEXT
     )
   `);
+  ensureColumn(db, "ingest_state", "session_id", "TEXT");
 }
 
 export function closeDb(): void {
