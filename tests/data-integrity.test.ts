@@ -277,6 +277,38 @@ if (sessionBaseKeys.size > 0) {
     `overlap=${overlap}`);
 }
 
+// ─── C.1 step_id collision guard (R4 deferral monitoring) ─────
+//
+// 08 risk register's R4 says current schema keeps step_id as a global
+// primary key, with `PRIMARY KEY (session_key, step_id)` reserved for
+// v0.2. To detect the moment a collision actually shows up in live
+// data — which would force a real migration — this assert is run
+// against the LIVE obs.db on every integrity sweep.
+//
+// A collision is defined as "the same step_id appearing under more
+// than one (session_key, run_id) scope". Within a single run a step
+// MUST be unique (already covered by B1 above); across runs the
+// current global PK forbids any collision physically (the INSERT
+// would silently UPDATE the existing row), but the guard catches
+// the moment we ever loosen the schema.
+console.log("\n=== C.1 step_id collision guard (R4 deferral) ===");
+{
+  const collisions = db.prepare(`
+    SELECT step_id, COUNT(DISTINCT (session_key || '|' || run_id)) as scopes
+    FROM steps
+    GROUP BY step_id
+    HAVING scopes > 1
+    LIMIT 5
+  `).all() as Array<{ step_id: string; scopes: number }>;
+  assert(
+    collisions.length === 0,
+    "no step_id collisions across (session_key, run_id) scopes",
+    collisions.length > 0
+      ? `${collisions.length} colliding step_id(s); first scopes=${collisions[0].scopes} — v0.2 must do composite identity migration`
+      : "",
+  );
+}
+
 // ─── D. HTTP API consistency (only if obs-v2 service is up) ─────
 console.log("\n=== D. HTTP API consistency (if service up) ===");
 
