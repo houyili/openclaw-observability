@@ -188,13 +188,34 @@ $EDITOR .env
 ./scripts/service.sh restart
 ```
 
-Then choose one tunnel option:
+Then choose one tunnel option.
 
-- ngrok: see [macOS install](install/macos.md) or [Linux install](install/linux.md)
-- Cloudflare Named Tunnel: see [Cloudflare tunnel](install/cloudflare.md)
+Cloudflare Quick Tunnel:
 
-Use `./scripts/tunnel-ngrok.sh url` to print the fixed URL when using ngrok.
-For other tunnel providers, set `OBS_FIXED_URL` in `.env`.
+```bash
+./scripts/tunnel.sh start
+./scripts/tunnel.sh url
+```
+
+ngrok fixed domain:
+
+```bash
+python3 scripts/install_ngrok.py
+./scripts/tunnel-ngrok.sh start
+./scripts/tunnel-ngrok.sh url
+```
+
+Both tunnel helpers refuse to expose or return a public URL unless
+`OBS_AUTH_TOKEN` is set. For an unauthenticated local-only demo, explicitly set
+`OBS_ALLOW_UNAUTH_TUNNEL=1`.
+
+The returned sharing URL uses `#token=...`, not `?token=...`, so the token stays
+in the browser fragment and is not sent in HTTP request lines.
+
+For managed Cloudflare Named Tunnels, see [Cloudflare tunnel](install/cloudflare.md).
+For ngrok token/domain setup details, see [macOS install](install/macos.md) or
+[Linux install](install/linux.md). For other tunnel providers, set
+`OBS_FIXED_URL` in `.env`.
 
 ## CLI Bridge
 
