@@ -113,6 +113,10 @@ export function startServer(): void {
 
       // API routes
       if (path === "/api/sessions") return handleSessionsRoutes.list(query, res, sendJson);
+      if (path.startsWith("/api/sessions/") && path.endsWith("/workflow")) {
+        const key = decodeURIComponent(path.slice("/api/sessions/".length, -"/workflow".length));
+        return handleSessionsRoutes.workflow(key, query, res, sendJson);
+      }
       if (path.startsWith("/api/sessions/") && path.endsWith("/trace")) {
         const key = decodeURIComponent(path.slice("/api/sessions/".length, -"/trace".length));
         return handleSessionsRoutes.trace(key, query, res, sendJson);

@@ -54,6 +54,7 @@ function migrate(db: DatabaseSync): void {
       updated_at        INTEGER,
       age_ms            INTEGER,
       source            TEXT DEFAULT 'auth-only',
+      token_source      TEXT DEFAULT 'official',
       PRIMARY KEY (session_key, session_id)
     )
   `);
@@ -98,6 +99,7 @@ function migrate(db: DatabaseSync): void {
   // Round 7 — parent-child session relationship from sessions.json spawnedBy.
   ensureColumn(db, "sessions", "parent_session_key", "TEXT");
   ensureColumn(db, "sessions", "parent_session_id", "TEXT");
+  ensureColumn(db, "sessions", "token_source", "TEXT DEFAULT 'official'");
 
   ensureColumn(db, "steps", "input_tokens",       "INTEGER");  // usage.input on MODEL_THINK / REPLY
   ensureColumn(db, "steps", "cache_read_tokens",  "INTEGER");  // usage.cacheRead on MODEL_THINK / REPLY

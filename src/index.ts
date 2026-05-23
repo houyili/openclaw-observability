@@ -72,6 +72,7 @@ const otelInterval = setInterval(doOtelRead, CONFIG.OTEL_POLL_MS);
 // for long, to pick up auth-only sessions). Cost is bounded to sessions that
 // actually changed.
 const dirtyBaseKeys = new Set<string>();
+let lastFullOpsSweepAt = 0;
 function doRecomputeOps(): void {
   try {
     if (dirtyBaseKeys.size > 0) {
@@ -79,7 +80,11 @@ function doRecomputeOps(): void {
       dirtyBaseKeys.clear();
       recomputeAllSessionOps(pending);
     }
-    // else: nothing changed since last tick → skip work entirely.
+    const now = Date.now();
+    if (now - lastFullOpsSweepAt >= CONFIG.RECOMPUTE_OPS_MS) {
+      recomputeAllSessionOps();
+      lastFullOpsSweepAt = now;
+    }
   } catch (err) {
     console.error("[recompute-ops] Error:", (err as Error).message);
   }

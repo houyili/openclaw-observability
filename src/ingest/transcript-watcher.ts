@@ -3,6 +3,7 @@ import { join, basename } from "node:path";
 import { CONFIG } from "../config.ts";
 import { parseTranscript, type TranscriptEntry, type ParsedRun } from "./transcript-parser.ts";
 import { getDb } from "../storage/db.ts";
+import { isCanonicalTranscriptFile } from "./transcript-files.ts";
 
 export interface WatcherCallbacks {
   onRuns: (sessionKey: string, runs: ParsedRun[]) => void;
@@ -133,7 +134,7 @@ function findTranscriptFiles(): string[] {
     if (!existsSync(sessionsDir)) continue;
 
     for (const f of readdirSync(sessionsDir)) {
-      if (f.endsWith(".jsonl") && !f.includes(".acp-stream")) {
+      if (isCanonicalTranscriptFile(f)) {
         files.push(join(sessionsDir, f));
       }
     }

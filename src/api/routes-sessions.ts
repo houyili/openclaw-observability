@@ -2,6 +2,7 @@ import type { ServerResponse } from "node:http";
 import { getAllSessions, getSession, getChildCounts, getParentInfoBatch } from "../storage/sessions-repo.ts";
 import { getLatestRun, getRunList, getTraceSpans, getActivityBars } from "../storage/steps-repo.ts";
 import { getContextBoth } from "../storage/context-repo.ts";
+import { getWorkflowGraph } from "../storage/workflow-repo.ts";
 
 type SendJson = (res: ServerResponse, data: unknown, status?: number) => void;
 
@@ -49,6 +50,7 @@ export const handleSessionsRoutes = {
         kind: s.kind,
         model: s.model,
         source: s.source,
+        tokenSource: s.token_source || "official",
         totalTokens: s.total_tokens,
         inputTokens: s.input_tokens,
         outputTokens: s.output_tokens,
@@ -99,6 +101,10 @@ export const handleSessionsRoutes = {
       latestRun,
       activityBars,
     });
+  },
+
+  workflow(key: string, query: Record<string, string>, res: ServerResponse, sendJson: SendJson) {
+    return sendJson(res, getWorkflowGraph(key, query.runId));
   },
 
   trace(key: string, query: Record<string, string>, res: ServerResponse, sendJson: SendJson) {

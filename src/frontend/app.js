@@ -299,25 +299,32 @@ window.selectRun = function(runId) {
   if (expandedSessionKey) refreshDetail(expandedSessionKey);
 };
 
-// Stacked detail: Workflow trace (top) + Context length (bottom), both refreshed together.
+// Stacked detail: Workflow Graph + Workflow trace + Context length, refreshed together.
 async function refreshDetail(key) {
   const detail = document.getElementById('session-detail');
   const runParam = selectedRunId ? `&runId=${encodeURIComponent(selectedRunId)}` : '';
-  const [traceRes, ctxRes] = await Promise.all([
+  const [workflowRes, traceRes, ctxRes] = await Promise.all([
+    authFetch(`/api/sessions/${encodeURIComponent(key)}/workflow?${runParam}`).catch(() => null),
     authFetch(`/api/sessions/${encodeURIComponent(key)}/trace?${runParam}`).catch(() => null),
     authFetch(`/api/sessions/${encodeURIComponent(key)}/context?${runParam}`).catch(() => null),
   ]);
 
+  let workflowData = null;
+  if (workflowRes && workflowRes.ok) { try { workflowData = await workflowRes.json(); } catch { /* swallow */ } }
   let traceData = null;
   if (traceRes && traceRes.ok) { try { traceData = await traceRes.json(); } catch { /* swallow */ } }
   let ctxData = null;
   if (ctxRes && ctxRes.ok) { try { ctxData = await ctxRes.json(); } catch { /* swallow */ } }
 
   // Run selector comes from whichever endpoint actually returned runs.
-  const runs = (traceData?.runs?.length ? traceData.runs : ctxData?.runs) || [];
-  const activeRunId = traceData?.runId || ctxData?.runId || null;
+  const runs = (workflowData?.runs?.length ? workflowData.runs : (traceData?.runs?.length ? traceData.runs : ctxData?.runs)) || [];
+  const activeRunId = workflowData?.runId || traceData?.runId || ctxData?.runId || null;
 
   let html = renderRunSelector(runs, activeRunId);
+  html += '<div class="detail-section detail-section-workflow">';
+  html += '<div class="detail-section-title">Workflow Graph</div>';
+  html += workflowData ? renderWorkflowGraph(workflowData) : '<div class="trace-header">No workflow data for this run</div>';
+  html += '</div>';
   html += '<div class="detail-section detail-section-trace">';
   html += '<div class="detail-section-title">Workflow trace</div>';
   html += traceData ? buildTraceHtml(traceData) : '<div class="trace-header">No trace data for this run</div>';
@@ -346,6 +353,72 @@ function renderRunSelector(runs, activeRunId) {
   html += '</div></div>';
   return html;
 }
+
+function renderWorkflowGraph(data) {
+  const lanes = data.lanes || [];
+  const events = data.events || [];
+  const edges = data.edges || [];
+  const diagnostics = data.diagnostics || [];
+  if (!events.length) return '<div class="trace-header">No workflow events for this run</div>';
+
+  const laneIds = lanes.map(l => l.id);
+  const byLane = new Map(laneIds.map(id => [id, []]));
+  for (const e of events) {
+    if (!byLane.has(e.laneId)) byLane.set(e.laneId, []);
+    byLane.get(e.laneId).push(e);
+  }
+  const outEdges = new Map();
+  for (const edge of edges) {
+    if (!outEdges.has(edge.from)) outEdges.set(edge.from, []);
+    outEdges.get(edge.from).push(edge);
+  }
+
+  let html = `<div class="workflow-view" style="--wf-lanes:${Math.max(1, laneIds.length)}">`;
+  html += `<div class="trace-header">
+    <strong>Run:</strong> ${esc((data.runId || '').slice(0,8) || 'latest')} &middot;
+    <strong>Events:</strong> ${events.length} &middot;
+    <strong>Edges:</strong> ${edges.length}
+  </div>`;
+  if (diagnostics.length) {
+    html += '<div class="workflow-diagnostics">';
+    for (const d of diagnostics) {
+      html += `<div class="workflow-diagnostic wf-${esc(d.severity)}">${esc(d.type)}: ${esc(d.message)}</div>`;
+    }
+    html += '</div>';
+  }
+  html += '<div class="workflow-grid">';
+  for (const lane of lanes) {
+    html += `<div class="workflow-lane workflow-lane-${esc(lane.kind)}">
+      <div class="workflow-lane-title">${esc(lane.title)}</div>`;
+    const laneEvents = byLane.get(lane.id) || [];
+    for (const e of laneEvents) {
+      const detailId = 'wf-detail-' + e.id.replace(/[^a-z0-9]/gi, '_');
+      const outgoing = outEdges.get(e.id) || [];
+      html += `<div class="workflow-event wf-type-${esc(e.type)}${e.status === 'warning' ? ' wf-event-warning' : ''}" onclick="toggleWorkflowDetail('${detailId}')">
+        <div class="workflow-event-time">${e.ts ? esc(new Date(e.ts).toLocaleTimeString()) : '-'}</div>
+        <div class="workflow-event-title">${esc(e.title)}</div>
+        ${e.subtitle ? `<div class="workflow-event-subtitle">${esc(e.subtitle)}</div>` : ''}
+        <div class="workflow-event-type">${esc(e.type)}</div>
+        ${outgoing.length ? `<div class="workflow-edges">${outgoing.map(edge => `<span>${esc(edge.label || edge.type)} -> ${esc(edge.to)}</span>`).join('')}</div>` : ''}
+      </div>`;
+      html += `<div id="${detailId}" class="workflow-detail hidden">`;
+      const prov = e.provenance || {};
+      for (const [k, v] of Object.entries(prov)) {
+        if (v == null || v === '') continue;
+        html += `<div class="detail-row"><span class="detail-label">${esc(k)}:</span> <code>${esc(String(v))}</code></div>`;
+      }
+      html += '</div>';
+    }
+    html += '</div>';
+  }
+  html += '</div></div>';
+  return html;
+}
+
+window.toggleWorkflowDetail = function(id) {
+  const el = document.getElementById(id);
+  if (el) el.classList.toggle('hidden');
+};
 
 function buildTraceHtml(data) {
   const spans = data.spans || [];

@@ -1,26 +1,38 @@
 import { getDb } from "./db.ts";
 import type { AuthSession } from "../ingest/auth-poller.ts";
+import { CONFIG } from "../config.ts";
 
 export function upsertAuthSessions(sessions: AuthSession[]): void {
   const db = getDb();
   const stmt = db.prepare(`
     INSERT INTO sessions (session_key, session_id, agent_id, channel, diag, label, kind,
       model, model_provider, input_tokens, output_tokens, total_tokens, context_tokens,
-      runtime_mode, updated_at, age_ms, source)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'auth-only')
+      runtime_mode, updated_at, age_ms, source, token_source)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'auth-only', ?)
     ON CONFLICT(session_key, session_id) DO UPDATE SET
       agent_id=excluded.agent_id,
       channel=excluded.channel, diag=excluded.diag, label=excluded.label, kind=excluded.kind,
       model=excluded.model, model_provider=excluded.model_provider,
-      input_tokens=excluded.input_tokens, output_tokens=excluded.output_tokens,
-      total_tokens=excluded.total_tokens, context_tokens=excluded.context_tokens,
+      input_tokens=CASE WHEN COALESCE(excluded.input_tokens, 0) > 0 THEN excluded.input_tokens ELSE sessions.input_tokens END,
+      output_tokens=CASE WHEN COALESCE(excluded.output_tokens, 0) > 0 THEN excluded.output_tokens ELSE sessions.output_tokens END,
+      total_tokens=CASE WHEN COALESCE(excluded.total_tokens, 0) > 0 THEN excluded.total_tokens ELSE sessions.total_tokens END,
+      context_tokens=CASE WHEN COALESCE(excluded.context_tokens, 0) > 0 THEN excluded.context_tokens ELSE sessions.context_tokens END,
       runtime_mode=excluded.runtime_mode,
-      updated_at=excluded.updated_at, age_ms=excluded.age_ms
+      updated_at=excluded.updated_at, age_ms=excluded.age_ms,
+      token_source=CASE
+        WHEN COALESCE(excluded.total_tokens, 0) > 0
+          OR COALESCE(excluded.input_tokens, 0) > 0
+          OR COALESCE(excluded.output_tokens, 0) > 0
+          OR COALESCE(excluded.context_tokens, 0) > 0
+        THEN 'official'
+        ELSE COALESCE(sessions.token_source, excluded.token_source, 'official-zero')
+      END
   `);
   for (const s of sessions) {
+    const tokenSource = (s.totalTokens || s.inputTokens || s.outputTokens || s.contextTokens) ? "official" : "official-zero";
     stmt.run(s.sessionKey, s.sessionId, s.agentId, s.channel, s.diag, s.label, s.kind,
       s.model, s.modelProvider, s.inputTokens, s.outputTokens, s.totalTokens, s.contextTokens,
-      s.runtimeMode, s.updatedAt, s.ageMs);
+      s.runtimeMode, s.updatedAt, s.ageMs, tokenSource);
   }
 }
 
@@ -86,6 +98,10 @@ export function recomputeAllSessionCounts(): void {
       input_tokens   = CASE WHEN COALESCE(input_tokens, 0) = 0 THEN ? ELSE input_tokens END,
       output_tokens  = CASE WHEN COALESCE(output_tokens, 0) = 0 THEN ? ELSE output_tokens END,
       context_tokens = CASE WHEN COALESCE(context_tokens, 0) = 0 THEN ? ELSE context_tokens END,
+      token_source   = CASE
+        WHEN COALESCE(total_tokens, 0) = 0 AND ? > 0 THEN 'transcript-backfill'
+        ELSE COALESCE(token_source, 'official')
+      END,
       updated_at     = MAX(COALESCE(updated_at, 0), ?),
       source = CASE WHEN ? > 0 THEN 'transcript+auth' ELSE source END
     WHERE session_key = ? OR session_key LIKE ?
@@ -99,6 +115,7 @@ export function recomputeAllSessionCounts(): void {
     updateStmt.run(
       row.llm || 0, row.tool || 0, row.skill || 0, row.mcp || 0,
       tok?.total_tok || 0, tok?.input_tok || 0, tok?.output_tok || 0, tok?.context_tok || 0,
+      tok?.total_tok || 0,
       latest?.latest || 0,
       row.total || 0,
       baseKey, baseKey + ":run:%",
@@ -155,12 +172,17 @@ export function recomputeSessionCounts(sessionKey: string): void {
       input_tokens   = CASE WHEN COALESCE(input_tokens, 0) = 0 THEN ? ELSE input_tokens END,
       output_tokens  = CASE WHEN COALESCE(output_tokens, 0) = 0 THEN ? ELSE output_tokens END,
       context_tokens = CASE WHEN COALESCE(context_tokens, 0) = 0 THEN ? ELSE context_tokens END,
+      token_source   = CASE
+        WHEN COALESCE(total_tokens, 0) = 0 AND ? > 0 THEN 'transcript-backfill'
+        ELSE COALESCE(token_source, 'official')
+      END,
       updated_at     = MAX(COALESCE(updated_at, 0), ?),
       source = CASE WHEN ? > 0 THEN 'transcript+auth' ELSE source END
     WHERE session_key = ? OR session_key LIKE ?
   `).run(
     row.llm || 0, row.tool || 0, row.skill || 0, row.mcp || 0,
     tok?.total_tok || 0, tok?.input_tok || 0, tok?.output_tok || 0, tok?.context_tok || 0,
+    tok?.total_tok || 0,
     latest?.latest || 0,
     row.total || 0,
     baseKey, baseKey + ":run:%",
@@ -261,7 +283,7 @@ export function recomputeAllSessionOps(onlyBaseKeys?: Set<string>): void {
 
   // Prepared statements reused across the loop.
   const lastStepStmt = db.prepare(`
-    SELECT tool_name, node_type, is_current, is_stuck, ts_epoch_ms, status
+    SELECT step_id, tool_name, node_type, is_current, is_stuck, ts_epoch_ms, status
     FROM steps WHERE session_key = ?
     ORDER BY ts_epoch_ms DESC LIMIT 1
   `);
@@ -272,18 +294,24 @@ export function recomputeAllSessionOps(onlyBaseKeys?: Set<string>): void {
   `);
   const stuckStepStmt = db.prepare(`
     SELECT tool_name, node_type, ts_epoch_ms
-    FROM steps WHERE session_key = ? AND is_stuck = 1
+    FROM steps
+    WHERE session_key = ? AND is_current = 1 AND (? - ts_epoch_ms) > ?
     ORDER BY ts_epoch_ms DESC LIMIT 1
+  `);
+  const markCurrentStuckStmt = db.prepare(`
+    UPDATE steps SET is_stuck = 1
+    WHERE session_key = ? AND is_current = 1 AND (? - ts_epoch_ms) > ?
   `);
   // Fan-out: write back to the base key AND every :run:UUID variant sharing it.
   const updateStmt = db.prepare(`
     UPDATE sessions SET
       current_op    = ?,
-      blocker       = COALESCE(?, blocker),
-      last_block_ts = COALESCE(?, last_block_ts),
-      diag_state    = COALESCE(diag_state, ?)
+      blocker       = ?,
+      last_block_ts = ?,
+      diag_state    = ?
     WHERE session_key = ? OR session_key LIKE ?
   `);
+  const now = Date.now();
 
   for (const baseKey of baseKeys) {
     const lastStep = lastStepStmt.get(baseKey) as any;
@@ -295,13 +323,16 @@ export function recomputeAllSessionOps(onlyBaseKeys?: Set<string>): void {
       if (prevTool) currentOp = prevTool.tool_name || prevTool.node_type;
     }
 
-    const stuckStep = stuckStepStmt.get(baseKey) as any;
+    markCurrentStuckStmt.run(baseKey, now, CONFIG.STUCK_THRESHOLD_MS);
+    const stuckStep = stuckStepStmt.get(baseKey, now, CONFIG.STUCK_THRESHOLD_MS) as any;
     const blocker = stuckStep ? (stuckStep.tool_name || stuckStep.node_type) : null;
     const blockTs = stuckStep ? stuckStep.ts_epoch_ms : null;
 
     let diagState = "idle";
-    if (lastStep.is_current) diagState = "processing";
-    if (lastStep.is_stuck) diagState = "stuck";
+    if (lastStep.is_current) {
+      const dynamicStuck = now - lastStep.ts_epoch_ms > CONFIG.STUCK_THRESHOLD_MS;
+      diagState = dynamicStuck ? "stuck" : "processing";
+    }
     if (lastStep.status === "error") diagState = "stuck";
 
     updateStmt.run(currentOp, blocker, blockTs, diagState, baseKey, baseKey + ":run:%");
@@ -340,6 +371,7 @@ export interface SessionRow {
   updated_at: number;
   age_ms: number;
   source: string;
+  token_source: string | null;
   parent_session_key: string | null;
   parent_session_id: string | null;
 }
