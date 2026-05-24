@@ -1,0 +1,42 @@
+# Dependabot configuration for OpenClaw Observability.
+#
+# We have ZERO runtime dependencies and only three devDependencies
+# (typescript, @types/node, @biomejs/biome). Dependabot is therefore
+# focused on:
+#
+#   1. GitHub Actions (actions/checkout, actions/setup-node, etc.) —
+#      these silently age and start emitting deprecation warnings every
+#      few months. Weekly checks keep us current.
+#   2. The handful of dev npm packages we do depend on for the
+#      typecheck/lint gates added in v0.1.3.
+#
+# We deliberately scope npm ecosystem updates to development-only
+# dependencies so production runtime stays at zero npm deps even if
+# someone adds a runtime dep by accident.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - github-actions
+    commit-message:
+      prefix: "ci"
+      include: scope
+
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    allow:
+      - dependency-type: development
+    labels:
+      - dependencies
+      - npm
+    commit-message:
+      prefix: "chore(deps)"
+      include: scope

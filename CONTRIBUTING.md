@@ -112,6 +112,9 @@ To see the dashboard without an OpenClaw install:
 Before opening a PR:
 
 ```bash
+npm install               # one-time per clone, pulls dev deps
+npm run typecheck         # tsc --noEmit (strict)
+npm run lint              # biome check
 npm run test:hermetic
 npm run test:open-source-sanitization
 bash -n scripts/*.sh
@@ -127,7 +130,18 @@ npm run test:replay
 npm run test:cross-check -- --retry-wait 0
 ```
 
-CI runs hermetic only.
+To see coverage numbers locally:
+
+```bash
+npm run coverage          # writes coverage/index.html + lcov.info
+npm run coverage:check    # enforces the current thresholds
+```
+
+CI runs hermetic + typecheck + lint + coverage on every push/PR.
+Before cutting a release, maintainers also trigger the
+`Release validation` workflow manually
+(`.github/workflows/release-validation.yml`) which adds Docker build
+smoke, format check, and a fresh-clone smoke pass on top.
 
 ## Code style
 

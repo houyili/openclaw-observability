@@ -1,0 +1,112 @@
+# Release validation workflow.
+#
+# This workflow is intentionally manual-only (workflow_dispatch). Run it
+# before cutting a new release / tag. It is the CI counterpart to the
+# Release Checklist in docs/release-checklist.md and covers everything
+# the routine `ci.yml` does plus the heavier checks that are too slow
+# for every PR (docker build, fresh-clone smoke).
+#
+# Live test suites (integrity / live-e2e / replay / cross-check / perf)
+# are NOT included here because they require a real OpenClaw runtime
+# with transcripts on the runner — see docs/release-checklist.md for
+# the local run instructions.
+#
+# This workflow is referenced from CONTRIBUTING.md as the "pre-release
+# CI gate" that maintainers should trigger before signing off on a
+# release-please PR.
+
+name: Release validation
+
+on:
+  workflow_dispatch:
+    inputs:
+      from-tag:
+        description: "Compare against this tag (informational only)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install dev dependencies
+        run: npm ci
+
+      - name: Type check (strict)
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Format check
+        run: npm run format:check
+
+      - name: Hermetic test suite
+        run: npm run test:hermetic
+
+      - name: Open-source sanitization
+        run: npm run test:open-source-sanitization
+
+      - name: Coverage (informational)
+        # Coverage is informational here; CI does not enforce a hard
+        # threshold yet. The local `npm run coverage:check` script in
+        # package.json captures the current floor; maintainers can
+        # tighten it before release.
+        run: npm run coverage
+        continue-on-error: true
+
+      - name: Shell syntax check
+        run: bash -n scripts/*.sh
+
+      - name: Python syntax check
+        run: python3 -m py_compile scripts/install_ngrok.py
+
+      - name: Installer dry-run
+        run: ./scripts/install.sh --dry-run --yes --no-start
+
+      - name: Docker build smoke
+        # Just builds the image; we don't run it on the runner because
+        # the image expects a populated OPENCLAW_HOME volume.
+        run: |
+          docker build --tag obs-v2-release-smoke:${{ github.sha }} .
+          docker image inspect obs-v2-release-smoke:${{ github.sha }} \
+            | grep '"Architecture"'
+
+      - name: Fresh clone smoke
+        # Simulate a brand-new contributor: clone the repo into a
+        # scratch dir and run the hermetic suite + installer dry-run.
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/fresh-clone
+          cp -r "$GITHUB_WORKSPACE" /tmp/fresh-clone/repo
+          cd /tmp/fresh-clone/repo
+          # node_modules and coverage carry over from the previous
+          # steps; clean them so we exercise an actual fresh install.
+          rm -rf node_modules coverage .nyc_output
+          npm ci
+          npm run typecheck
+          npm run lint
+          npm run test:hermetic
+          ./scripts/install.sh --dry-run --yes --no-start
+          bash scripts/demo.sh --seed-only --target /tmp/fresh-clone/demo
+
+      - name: Upload coverage artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ github.sha }}
+          path: coverage/
+          if-no-files-found: ignore
+          retention-days: 14

@@ -8,3 +8,7 @@ node_modules/
 __pycache__/
 .DS_Store
 openclaw-observability.service
+
+# c8 coverage output (G11 in v0.1.3 polish wave)
+coverage/
+.nyc_output/

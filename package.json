@@ -39,6 +39,8 @@
     "lint": "biome check .",
     "format": "biome format --write .",
     "format:check": "biome format .",
+    "coverage": "c8 --reporter=text --reporter=lcov --reporter=html --reports-dir=coverage npm run test:hermetic",
+    "coverage:check": "c8 check-coverage --lines 80 --functions 85 --branches 70",
     "test": "./tests/run-all.sh",
     "test:hermetic": "TEST_FILTER='unit invariants fixture transcript-consistency-e2e prompt-check open-source-sanitization auth-stale context-length cli-commands frontend-detail workflow-projection workflow-frontend session-id-scope env-config service-self-check installer-scripts watcher-rehome token-backfill parent-child mcp-registry-coverage metrics redact demo-seed' ./tests/run-all.sh",
     "test:unit": "node --experimental-sqlite --experimental-strip-types --no-warnings tests/run-tests.ts",
@@ -76,6 +78,7 @@
   "devDependencies": {
     "@biomejs/biome": "^2.4.15",
     "@types/node": "^25.9.1",
+    "c8": "^11.0.0",
     "typescript": "^6.0.3"
   }
 }

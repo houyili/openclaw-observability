@@ -42,7 +42,11 @@ jobs:
         run: bash -n scripts/*.sh
       - name: Python syntax check
         run: python3 -m py_compile scripts/install_ngrok.py
-      - name: Hermetic test suite
-        run: npm run test:hermetic
+      - name: Hermetic test suite (with coverage)
+        # c8 wraps `npm run test:hermetic` and produces coverage/
+        # output. Failing tests still fail the job; coverage is the
+        # by-product. The dedicated release-validation workflow does
+        # the same thing but also uploads coverage as an artifact.
+        run: npm run coverage
       - name: Installer dry-run
         run: ./scripts/install.sh --dry-run --yes --no-start

@@ -1,0 +1,21 @@
+{
+  "all": true,
+  "include": ["src/**/*.ts"],
+  "exclude": [
+    "src/frontend/**",
+    "src/cli/dispatcher.ts",
+    "tests/**",
+    "scripts/**",
+    "docs/**",
+    "**/*.d.ts",
+    "**/node_modules/**",
+    "**/*.test.ts",
+    "**/test_*.py"
+  ],
+  "reporter": ["text", "lcov", "html"],
+  "reports-dir": "coverage",
+  "skip-full": false,
+  "exclude-after-remap": true,
+  "experimental-monocart": false,
+  "clean": true
+}

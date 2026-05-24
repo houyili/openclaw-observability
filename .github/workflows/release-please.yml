@@ -1,0 +1,93 @@
+# release-please workflow.
+#
+# Automates the "what is the next version + write the release notes +
+# tag + create GitHub Release" loop. On every push to main:
+#
+#   1. release-please-action scans new commits using Conventional
+#      Commits (feat: / fix: / chore: / docs: / etc.) and either
+#      OPENS a "chore: release X.Y.Z" PR or, if such a PR is already
+#      open, UPDATES it to reflect the latest commits.
+#   2. When that PR is merged, release-please reads the version it
+#      wrote into package.json, creates the v<X.Y.Z> tag, and creates
+#      a GitHub Release populated from CHANGELOG.md.
+#
+# We use release-type: simple because OpenClaw Observability is NOT
+# published to npm — there is no `npm publish` step here, just the
+# git tag + GitHub Release artifacts.
+#
+# Once the GitHub Release exists, the build-provenance job below
+# attaches SBOM + SLSA attestation to a freshly-built source tarball
+# (closes G19 from the v0.1.3 polish wave).
+#
+# Note: release-please only runs on push to main, not on PRs, so the
+# resulting "chore: release ..." PR is safe to ignore until you are
+# ready to cut a release.
+
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+  id-token: write
+  attestations: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      released: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - name: release-please
+        id: release
+        uses: googleapis/release-please-action@v4
+        with:
+          # Manifest mode: version source is .release-please-manifest.json
+          # and configuration is release-please-config.json. This avoids
+          # surprises on the first run since the existing v0.1.x tags
+          # are already present in the repo.
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  attest-source-tarball:
+    needs: release-please
+    if: needs.release-please.outputs.released == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          ref: ${{ needs.release-please.outputs.tag_name }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Pack source tarball
+        # `npm pack` honors the `files` allowlist in package.json so the
+        # tarball contains only the versioned source surface (no node_modules,
+        # no .git, no .env, no logs / DB / runtime state).
+        run: npm pack --pack-destination ./release-artifacts/
+      - name: Attest tarball provenance
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: "release-artifacts/*.tgz"
+      - name: Upload tarball to the GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag="${{ needs.release-please.outputs.tag_name }}"
+          for f in release-artifacts/*.tgz; do
+            echo "Uploading $f to release $tag"
+            gh release upload "$tag" "$f" --clobber
+          done
