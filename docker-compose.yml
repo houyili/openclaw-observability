@@ -1,0 +1,52 @@
+# OpenClaw Observability — docker-compose
+#
+# Run from this repository's root with:
+#   docker compose up -d
+#
+# Defaults assume the operator is on a host with $HOME/.openclaw populated
+# (i.e. you already use OpenClaw natively). The compose file mounts that
+# directory read-only for transcripts and read-write for the observability
+# log/database directory.
+#
+# To run against a synthetic dataset (no real OpenClaw needed), point
+# OPENCLAW_HOME at a directory created by `./scripts/demo.sh --seed-only`
+# instead — see docs/install/docker.md.
+
+services:
+  observability:
+    image: openclaw-observability:local
+    build: .
+    container_name: openclaw-observability
+    restart: unless-stopped
+    ports:
+      - "18902:18902"
+    environment:
+      OBS_HOST: 0.0.0.0
+      OBS_PORT: 18902
+      # OBS_AUTH_TOKEN: change-me           # uncomment + set for remote access
+      # OBS_ALLOW_UNAUTH_TUNNEL: "0"
+      OPENCLAW_HOME: /openclaw
+    volumes:
+      - type: bind
+        source: ${HOME}/.openclaw/agents
+        target: /openclaw/agents
+        read_only: true
+      - type: bind
+        source: ${HOME}/.openclaw/logs/observability-v2
+        target: /openclaw/logs/observability-v2
+      # Optional: mount openclaw.json / mcp/ so the MCP registry shows
+      # installed-but-unused MCPs on Tab 4. Read-only is fine.
+      - type: bind
+        source: ${HOME}/.openclaw/openclaw.json
+        target: /openclaw/openclaw.json
+        read_only: true
+      - type: bind
+        source: ${HOME}/.openclaw/mcp
+        target: /openclaw/mcp
+        read_only: true
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:18902/healthz',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

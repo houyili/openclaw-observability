@@ -1,0 +1,37 @@
+# Runtime / local-only state
+.env
+.env.local
+node_modules
+*.log
+logs/
+**/.DS_Store
+
+# Generated service files
+com.openclaw.observability-v2.plist
+openclaw-observability.service
+
+# Local SQLite DBs (we want the image to start clean)
+*.db
+*.db-wal
+*.db-shm
+
+# Git internals
+.git
+.gitignore
+
+# Editor / OS noise
+.vscode
+.idea
+*.swp
+
+# Demo seed outputs and tmp paths
+tests/fixtures/demo/logs
+
+# CI internals
+.github
+
+# Build artifacts (no build step, but keep the door closed)
+dist
+build
+coverage
+.nyc_output
