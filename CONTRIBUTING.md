@@ -148,3 +148,8 @@ See [SECURITY.md](SECURITY.md).
 
 By contributing you agree your contributions are licensed under the
 Apache License 2.0 (see [LICENSE](LICENSE)).
+
+## Becoming a Maintainer
+
+See [MAINTAINERS.md](MAINTAINERS.md) for the current maintainers list,
+bus factor disclosure, and the path from contributor to maintainer.
