@@ -1,5 +1,5 @@
-import { getDb } from "./db.ts";
 import type { RegistryEntry } from "../ingest/registry-scanner.ts";
+import { getDb } from "./db.ts";
 
 export function upsertRegistryEntries(entries: RegistryEntry[]): void {
   const db = getDb();
@@ -29,13 +29,20 @@ export function touchRegistryEntry(type: string, name: string, path?: string): v
   if (existing) {
     // Update last_seen_at, and fill in path if it was null
     if (path && !existing.path) {
-      db.prepare("UPDATE registry SET last_seen_at = ?, path = ? WHERE type = ? AND name = ?").run(now, path, type, name);
+      db.prepare("UPDATE registry SET last_seen_at = ?, path = ? WHERE type = ? AND name = ?").run(
+        now,
+        path,
+        type,
+        name,
+      );
     } else {
       db.prepare("UPDATE registry SET last_seen_at = ? WHERE type = ? AND name = ?").run(now, type, name);
     }
   } else {
     // Discovered from transcript (not from disk scan) → status = 'observed'
-    db.prepare("INSERT INTO registry (type, name, path, discovered_at, last_seen_at, status) VALUES (?, ?, ?, ?, ?, 'observed')").run(type, name, path || null, now, now);
+    db.prepare(
+      "INSERT INTO registry (type, name, path, discovered_at, last_seen_at, status) VALUES (?, ?, ?, ?, ?, 'observed')",
+    ).run(type, name, path || null, now, now);
   }
 }
 

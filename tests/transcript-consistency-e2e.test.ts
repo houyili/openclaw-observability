@@ -8,15 +8,17 @@
  */
 
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 let passed = 0;
 let failed = 0;
 const failures: string[] = [];
 function assert(cond: boolean, name: string, detail?: string) {
-  if (cond) { passed++; console.log(`  ✅ ${name}`); }
-  else {
+  if (cond) {
+    passed++;
+    console.log(`  ✅ ${name}`);
+  } else {
     failed++;
     console.log(`  ❌ ${name}${detail ? ` — ${detail}` : ""}`);
     failures.push(name);
@@ -63,126 +65,273 @@ type Entry = {
 };
 
 const parentEntries: Entry[] = [
-  { type: "message", id: parentRun1, parentId: "", timestamp: "2026-05-23T10:00:00.000Z",
-    message: { role: "user", content: [{ type: "text", text: "first request" }] } },
-  { type: "message", id: "a-parent-1", parentId: parentRun1, timestamp: "2026-05-23T10:00:05.000Z",
-    message: { role: "assistant", content: [
-      { type: "thinking", text: "read and write checkpoint" },
-      { type: "toolCall", name: "read", id: "tc-read", arguments: { file_path: "/tmp/local-input.md" } },
-      { type: "toolCall", name: "write", id: "tc-write", arguments: { file_path: checkpointPath, content: "checkpoint" } },
-    ], usage: { input: 1000, output: 80, cacheRead: 200, totalTokens: 1280 } } },
-  { type: "message", id: "r-parent-read", parentId: "a-parent-1", timestamp: "2026-05-23T10:00:07.000Z",
-    message: { role: "toolResult", content: [{ type: "text", text: "read ok" }] } },
-  { type: "message", id: "r-parent-write", parentId: "r-parent-read", timestamp: "2026-05-23T10:00:08.500Z",
-    message: { role: "toolResult", content: [{ type: "text", text: `wrote ${checkpointPath}` }] } },
-  { type: "message", id: "a-parent-2", parentId: "r-parent-write", timestamp: "2026-05-23T10:00:12.000Z",
-    message: { role: "assistant", content: [
-      { type: "thinking", text: "wrap first run" },
-      { type: "text", text: "first run complete" },
-    ], usage: { input: 1600, output: 40, cacheRead: 400, totalTokens: 2040 } } },
+  {
+    type: "message",
+    id: parentRun1,
+    parentId: "",
+    timestamp: "2026-05-23T10:00:00.000Z",
+    message: { role: "user", content: [{ type: "text", text: "first request" }] },
+  },
+  {
+    type: "message",
+    id: "a-parent-1",
+    parentId: parentRun1,
+    timestamp: "2026-05-23T10:00:05.000Z",
+    message: {
+      role: "assistant",
+      content: [
+        { type: "thinking", text: "read and write checkpoint" },
+        { type: "toolCall", name: "read", id: "tc-read", arguments: { file_path: "/tmp/local-input.md" } },
+        {
+          type: "toolCall",
+          name: "write",
+          id: "tc-write",
+          arguments: { file_path: checkpointPath, content: "checkpoint" },
+        },
+      ],
+      usage: { input: 1000, output: 80, cacheRead: 200, totalTokens: 1280 },
+    },
+  },
+  {
+    type: "message",
+    id: "r-parent-read",
+    parentId: "a-parent-1",
+    timestamp: "2026-05-23T10:00:07.000Z",
+    message: { role: "toolResult", content: [{ type: "text", text: "read ok" }] },
+  },
+  {
+    type: "message",
+    id: "r-parent-write",
+    parentId: "r-parent-read",
+    timestamp: "2026-05-23T10:00:08.500Z",
+    message: { role: "toolResult", content: [{ type: "text", text: `wrote ${checkpointPath}` }] },
+  },
+  {
+    type: "message",
+    id: "a-parent-2",
+    parentId: "r-parent-write",
+    timestamp: "2026-05-23T10:00:12.000Z",
+    message: {
+      role: "assistant",
+      content: [
+        { type: "thinking", text: "wrap first run" },
+        { type: "text", text: "first run complete" },
+      ],
+      usage: { input: 1600, output: 40, cacheRead: 400, totalTokens: 2040 },
+    },
+  },
 
-  { type: "message", id: parentRun2, parentId: "a-parent-2", timestamp: "2026-05-23T10:01:00.000Z",
-    message: { role: "user", content: [{ type: "text", text: "spawn source refresh" }] } },
-  { type: "message", id: "a-parent-3", parentId: parentRun2, timestamp: "2026-05-23T10:01:05.000Z",
-    message: { role: "assistant", content: [
-      { type: "thinking", text: "spawn a child" },
-      { type: "toolCall", name: "sessions_spawn", id: "tc-spawn", arguments: { taskName: "source-refresh" } },
-    ], usage: { input: 5000, output: 120, cacheRead: 3000, totalTokens: 8120 } } },
-  { type: "message", id: "r-spawn", parentId: "a-parent-3", timestamp: "2026-05-23T10:01:06.000Z",
-    message: { role: "toolResult", content: [{ type: "text", text: JSON.stringify({
-      accepted: true,
-      childSessionKey: childKey,
-      runId: childRun,
-      taskName: "source-refresh",
-      mode: "run",
-    }) }] } },
-  { type: "message", id: "a-parent-4", parentId: "r-spawn", timestamp: "2026-05-23T10:01:10.000Z",
-    message: { role: "assistant", content: [
-      { type: "thinking", text: "record workflow state" },
-      { type: "toolCall", name: "write", id: "tc-work-status", arguments: { file_path: workStatusPath, content: "no managed block" } },
-    ], usage: { input: 5800, output: 90, cacheRead: 3500, totalTokens: 9390 } } },
-  { type: "message", id: "r-work-status", parentId: "a-parent-4", timestamp: "2026-05-23T10:01:10.100Z",
-    message: { role: "toolResult", content: [{ type: "text", text: `updated ${workStatusPath}` }] } },
-  { type: "message", id: "a-parent-5", parentId: "r-work-status", timestamp: "2026-05-23T10:01:20.000Z",
-    message: { role: "assistant", content: [
-      { type: "thinking", text: "yield until child returns" },
-      { type: "toolCall", name: "sessions_yield", id: "tc-yield", arguments: { reason: "wait for source-refresh" } },
-    ], usage: { input: 6400, output: 50, cacheRead: 4000, totalTokens: 10450 } } },
-  { type: "message", id: "r-yield", parentId: "a-parent-5", timestamp: "2026-05-23T10:01:20.050Z",
-    message: { role: "toolResult", content: [{ type: "text", text: "parent yielded" }] } },
+  {
+    type: "message",
+    id: parentRun2,
+    parentId: "a-parent-2",
+    timestamp: "2026-05-23T10:01:00.000Z",
+    message: { role: "user", content: [{ type: "text", text: "spawn source refresh" }] },
+  },
+  {
+    type: "message",
+    id: "a-parent-3",
+    parentId: parentRun2,
+    timestamp: "2026-05-23T10:01:05.000Z",
+    message: {
+      role: "assistant",
+      content: [
+        { type: "thinking", text: "spawn a child" },
+        { type: "toolCall", name: "sessions_spawn", id: "tc-spawn", arguments: { taskName: "source-refresh" } },
+      ],
+      usage: { input: 5000, output: 120, cacheRead: 3000, totalTokens: 8120 },
+    },
+  },
+  {
+    type: "message",
+    id: "r-spawn",
+    parentId: "a-parent-3",
+    timestamp: "2026-05-23T10:01:06.000Z",
+    message: {
+      role: "toolResult",
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            accepted: true,
+            childSessionKey: childKey,
+            runId: childRun,
+            taskName: "source-refresh",
+            mode: "run",
+          }),
+        },
+      ],
+    },
+  },
+  {
+    type: "message",
+    id: "a-parent-4",
+    parentId: "r-spawn",
+    timestamp: "2026-05-23T10:01:10.000Z",
+    message: {
+      role: "assistant",
+      content: [
+        { type: "thinking", text: "record workflow state" },
+        {
+          type: "toolCall",
+          name: "write",
+          id: "tc-work-status",
+          arguments: { file_path: workStatusPath, content: "no managed block" },
+        },
+      ],
+      usage: { input: 5800, output: 90, cacheRead: 3500, totalTokens: 9390 },
+    },
+  },
+  {
+    type: "message",
+    id: "r-work-status",
+    parentId: "a-parent-4",
+    timestamp: "2026-05-23T10:01:10.100Z",
+    message: { role: "toolResult", content: [{ type: "text", text: `updated ${workStatusPath}` }] },
+  },
+  {
+    type: "message",
+    id: "a-parent-5",
+    parentId: "r-work-status",
+    timestamp: "2026-05-23T10:01:20.000Z",
+    message: {
+      role: "assistant",
+      content: [
+        { type: "thinking", text: "yield until child returns" },
+        { type: "toolCall", name: "sessions_yield", id: "tc-yield", arguments: { reason: "wait for source-refresh" } },
+      ],
+      usage: { input: 6400, output: 50, cacheRead: 4000, totalTokens: 10450 },
+    },
+  },
+  {
+    type: "message",
+    id: "r-yield",
+    parentId: "a-parent-5",
+    timestamp: "2026-05-23T10:01:20.050Z",
+    message: { role: "toolResult", content: [{ type: "text", text: "parent yielded" }] },
+  },
 ];
 
 const childEntries: Entry[] = [
-  { type: "message", id: childRun, parentId: "", timestamp: "2026-05-23T10:01:06.500Z",
-    message: { role: "user", content: [{ type: "text", text: "source refresh task" }] } },
-  { type: "message", id: "a-child-1", parentId: childRun, timestamp: "2026-05-23T10:01:25.000Z",
-    message: { role: "assistant", content: [
-      { type: "thinking", text: "collect child sources" },
-      { type: "toolCall", name: "write", id: "tc-child-write", arguments: { file_path: childArtifactPath, content: "sources" } },
-    ], usage: { input: 2100, output: 70, cacheRead: 500, totalTokens: 2670 } } },
-  { type: "message", id: "r-child-write", parentId: "a-child-1", timestamp: "2026-05-23T10:01:27.000Z",
-    message: { role: "toolResult", content: [{ type: "text", text: `saved ${childArtifactPath}` }] } },
-  { type: "message", id: "a-child-2", parentId: "r-child-write", timestamp: "2026-05-23T10:01:30.000Z",
-    message: { role: "assistant", content: [
-      { type: "thinking", text: "summarize child work" },
-      { type: "text", text: "child final complete" },
-    ], usage: { input: 2600, output: 60, cacheRead: 700, totalTokens: 3360 } } },
+  {
+    type: "message",
+    id: childRun,
+    parentId: "",
+    timestamp: "2026-05-23T10:01:06.500Z",
+    message: { role: "user", content: [{ type: "text", text: "source refresh task" }] },
+  },
+  {
+    type: "message",
+    id: "a-child-1",
+    parentId: childRun,
+    timestamp: "2026-05-23T10:01:25.000Z",
+    message: {
+      role: "assistant",
+      content: [
+        { type: "thinking", text: "collect child sources" },
+        {
+          type: "toolCall",
+          name: "write",
+          id: "tc-child-write",
+          arguments: { file_path: childArtifactPath, content: "sources" },
+        },
+      ],
+      usage: { input: 2100, output: 70, cacheRead: 500, totalTokens: 2670 },
+    },
+  },
+  {
+    type: "message",
+    id: "r-child-write",
+    parentId: "a-child-1",
+    timestamp: "2026-05-23T10:01:27.000Z",
+    message: { role: "toolResult", content: [{ type: "text", text: `saved ${childArtifactPath}` }] },
+  },
+  {
+    type: "message",
+    id: "a-child-2",
+    parentId: "r-child-write",
+    timestamp: "2026-05-23T10:01:30.000Z",
+    message: {
+      role: "assistant",
+      content: [
+        { type: "thinking", text: "summarize child work" },
+        { type: "text", text: "child final complete" },
+      ],
+      usage: { input: 2600, output: 60, cacheRead: 700, totalTokens: 3360 },
+    },
+  },
 ];
 
 function writeJsonl(path: string, entries: Entry[]) {
-  writeFileSync(path, entries.map(e => JSON.stringify(e)).join("\n") + "\n");
+  writeFileSync(path, `${entries.map((e) => JSON.stringify(e)).join("\n")}\n`);
 }
 
-writeFileSync(join(tmpHome, "agents/demo/sessions/sessions.json"), JSON.stringify({
-  [parentKey]: { sessionId: parentSid, label: "local parent" },
-  [childKey]: { sessionId: childSid, label: "local child", spawnedBy: parentKey },
-}));
+writeFileSync(
+  join(tmpHome, "agents/demo/sessions/sessions.json"),
+  JSON.stringify({
+    [parentKey]: { sessionId: parentSid, label: "local parent" },
+    [childKey]: { sessionId: childSid, label: "local child", spawnedBy: parentKey },
+  }),
+);
 writeJsonl(join(tmpHome, "agents/demo/sessions", `${parentSid}.jsonl`), parentEntries);
 writeJsonl(join(tmpHome, "agents/demo/sessions", `${childSid}.jsonl`), childEntries);
 writeJsonl(join(tmpHome, "agents/demo/sessions", `${parentSid}.acp-stream.jsonl`), [
-  { type: "message", id: "sidecar-user", parentId: "", timestamp: "2026-05-23T10:09:00.000Z",
-    message: { role: "user", content: [{ type: "text", text: "sidecar" }] } },
-  { type: "message", id: "sidecar-assistant", parentId: "sidecar-user", timestamp: "2026-05-23T10:09:01.000Z",
-    message: { role: "assistant", content: [{ type: "text", text: "must not ingest" }],
-      usage: { input: 1, output: 1, totalTokens: 2 } } },
+  {
+    type: "message",
+    id: "sidecar-user",
+    parentId: "",
+    timestamp: "2026-05-23T10:09:00.000Z",
+    message: { role: "user", content: [{ type: "text", text: "sidecar" }] },
+  },
+  {
+    type: "message",
+    id: "sidecar-assistant",
+    parentId: "sidecar-user",
+    timestamp: "2026-05-23T10:09:01.000Z",
+    message: {
+      role: "assistant",
+      content: [{ type: "text", text: "must not ingest" }],
+      usage: { input: 1, output: 1, totalTokens: 2 },
+    },
+  },
 ]);
 writeJsonl(join(tmpHome, "agents/demo/sessions", `${parentSid}.checkpoint.1.jsonl`), []);
 writeJsonl(join(tmpHome, "agents/demo/sessions", `${parentSid}.trajectory.jsonl`), []);
-writeFileSync(hookRemindersPath, [
-  JSON.stringify({
-    ts: "2026-05-23T10:01:19.900Z",
-    sessionKey: parentKey,
-    sessionId: parentSid,
-    runId: parentRun2,
-    relatedStepId: "a-parent-5:tc-yield",
-    hookId: "research-checkpoint-before-yield",
-    event: "reminder_shown",
-    severity: "warning",
-    message: "Write checkpoint before sessions_yield",
-  }),
-  JSON.stringify({
-    ts: "2026-05-23T10:01:19.950Z",
-    sessionKey: parentKey,
-    sessionId: parentSid,
-    runId: "unrelated-run",
-    relatedStepId: "unrelated-step",
-    hookId: "research-checkpoint-before-yield",
-    event: "reminder_shown",
-    severity: "warning",
-    message: "This hook belongs to a different run",
-  }),
-].join("\n") + "\n");
+writeFileSync(
+  hookRemindersPath,
+  `${[
+    JSON.stringify({
+      ts: "2026-05-23T10:01:19.900Z",
+      sessionKey: parentKey,
+      sessionId: parentSid,
+      runId: parentRun2,
+      relatedStepId: "a-parent-5:tc-yield",
+      hookId: "research-checkpoint-before-yield",
+      event: "reminder_shown",
+      severity: "warning",
+      message: "Write checkpoint before sessions_yield",
+    }),
+    JSON.stringify({
+      ts: "2026-05-23T10:01:19.950Z",
+      sessionKey: parentKey,
+      sessionId: parentSid,
+      runId: "unrelated-run",
+      relatedStepId: "unrelated-step",
+      hookId: "research-checkpoint-before-yield",
+      event: "reminder_shown",
+      severity: "warning",
+      message: "This hook belongs to a different run",
+    }),
+  ].join("\n")}\n`,
+);
 
 const { startTranscriptWatcher, _resetSessionIdMapForTest } = await import("../src/ingest/transcript-watcher.ts");
 const { ingestHookReminderFile } = await import("../src/ingest/hook-reminder-reader.ts");
 const { readSessionStoreExtras } = await import("../src/ingest/auth-poller.ts");
 const { upsertAuthSessions } = await import("../src/storage/sessions-repo.ts");
-const {
-  recomputeSessionCounts,
-  recomputeAllSessionOps,
-  updateSessionLabel,
-  updateSessionParent,
-} = await import("../src/storage/sessions-repo.ts");
+const { recomputeSessionCounts, recomputeAllSessionOps, updateSessionLabel, updateSessionParent } = await import(
+  "../src/storage/sessions-repo.ts"
+);
 const { upsertSteps, getTraceSpans, getRunList, getLatestRun } = await import("../src/storage/steps-repo.ts");
 const { getContextBoth } = await import("../src/storage/context-repo.ts");
 const { getWorkflowGraph } = await import("../src/storage/workflow-repo.ts");
@@ -234,7 +383,8 @@ function deriveTranscriptOracle(entries: Entry[], sessionKey: string, sessionId:
     let prevEntryTs = startTs;
     const pending = new Map<string, ExpectedStep>();
     for (const step of current) {
-      if (step.node_type === "MODEL_THINK" || step.node_type === "REPLY") step.duration_ms = step.ts_epoch_ms - prevEntryTs;
+      if (step.node_type === "MODEL_THINK" || step.node_type === "REPLY")
+        step.duration_ms = step.ts_epoch_ms - prevEntryTs;
       else if (step.role === "toolResult") step.duration_ms = 0;
       else step.duration_ms = 0;
 
@@ -273,19 +423,40 @@ function deriveTranscriptOracle(entries: Entry[], sessionKey: string, sessionId:
     const tsEpochMs = Date.parse(entry.timestamp);
     if (msg.role === "assistant") {
       const content = Array.isArray(msg.content) ? msg.content : [];
-      const toolCalls = content.filter(c => c.type === "toolCall" || c.type === "tool_use");
-      const hasThinking = content.some(c => c.type === "thinking");
-      const hasText = content.some(c => c.type === "text" && c.text?.trim());
-      const thinkingTextLen = content.filter(c => c.type === "thinking").reduce((n, c) => n + (typeof c.text === "string" ? c.text.length : 0), 0);
-      const replyTextLen = content.filter(c => c.type === "text").reduce((n, c) => n + (typeof c.text === "string" ? c.text.length : 0), 0);
+      const toolCalls = content.filter((c) => c.type === "toolCall" || c.type === "tool_use");
+      const hasThinking = content.some((c) => c.type === "thinking");
+      const hasText = content.some((c) => c.type === "text" && c.text?.trim());
+      const thinkingTextLen = content
+        .filter((c) => c.type === "thinking")
+        .reduce((n, c) => n + (typeof c.text === "string" ? c.text.length : 0), 0);
+      const replyTextLen = content
+        .filter((c) => c.type === "text")
+        .reduce((n, c) => n + (typeof c.text === "string" ? c.text.length : 0), 0);
       if (hasThinking || toolCalls.length > 0) {
         current.push({
-          step_id: entry.id, parent_step_id: entry.parentId, session_key: sessionKey, session_id: sessionId, run_id: runId,
-          seq: seq++, ts_epoch_ms: tsEpochMs, role: "assistant", node_type: "MODEL_THINK", tool_name: null, tool_call_id: null,
-          duration_ms: null, total_tokens: msg.usage?.totalTokens ?? null, output_tokens: msg.usage?.output ?? null,
-          input_tokens: msg.usage?.input ?? null, cache_read_tokens: msg.usage?.cacheRead ?? null,
-          input_text_len: null, result_text_len: null, thinking_text_len: thinkingTextLen || null, reply_text_len: null,
-          status: "ok", is_current: 0, is_stuck: 0,
+          step_id: entry.id,
+          parent_step_id: entry.parentId,
+          session_key: sessionKey,
+          session_id: sessionId,
+          run_id: runId,
+          seq: seq++,
+          ts_epoch_ms: tsEpochMs,
+          role: "assistant",
+          node_type: "MODEL_THINK",
+          tool_name: null,
+          tool_call_id: null,
+          duration_ms: null,
+          total_tokens: msg.usage?.totalTokens ?? null,
+          output_tokens: msg.usage?.output ?? null,
+          input_tokens: msg.usage?.input ?? null,
+          cache_read_tokens: msg.usage?.cacheRead ?? null,
+          input_text_len: null,
+          result_text_len: null,
+          thinking_text_len: thinkingTextLen || null,
+          reply_text_len: null,
+          status: "ok",
+          is_current: 0,
+          is_stuck: 0,
         });
       }
       for (const tc of toolCalls) {
@@ -293,32 +464,85 @@ function deriveTranscriptOracle(entries: Entry[], sessionKey: string, sessionId:
         const id = tc.id || tc.toolCallId || "";
         const input = tc.arguments || tc.input || tc.params || {};
         current.push({
-          step_id: `${entry.id}:${id}`, parent_step_id: entry.id, session_key: sessionKey, session_id: sessionId, run_id: runId,
-          seq: seq++, ts_epoch_ms: tsEpochMs, role: "assistant", node_type: classifyForOracle(name), tool_name: name, tool_call_id: id,
-          duration_ms: null, total_tokens: null, output_tokens: toolCalls.length > 0 && msg.usage ? Math.round(msg.usage.output / toolCalls.length) : null,
-          input_tokens: null, cache_read_tokens: null, input_text_len: JSON.stringify(input).length, result_text_len: null,
-          thinking_text_len: null, reply_text_len: null, status: "running", is_current: 1, is_stuck: 0,
+          step_id: `${entry.id}:${id}`,
+          parent_step_id: entry.id,
+          session_key: sessionKey,
+          session_id: sessionId,
+          run_id: runId,
+          seq: seq++,
+          ts_epoch_ms: tsEpochMs,
+          role: "assistant",
+          node_type: classifyForOracle(name),
+          tool_name: name,
+          tool_call_id: id,
+          duration_ms: null,
+          total_tokens: null,
+          output_tokens: toolCalls.length > 0 && msg.usage ? Math.round(msg.usage.output / toolCalls.length) : null,
+          input_tokens: null,
+          cache_read_tokens: null,
+          input_text_len: JSON.stringify(input).length,
+          result_text_len: null,
+          thinking_text_len: null,
+          reply_text_len: null,
+          status: "running",
+          is_current: 1,
+          is_stuck: 0,
         });
       }
       if (hasText && toolCalls.length === 0) {
         current.push({
-          step_id: `${entry.id}:reply`, parent_step_id: entry.parentId, session_key: sessionKey, session_id: sessionId, run_id: runId,
-          seq: seq++, ts_epoch_ms: tsEpochMs, role: "assistant", node_type: "REPLY", tool_name: null, tool_call_id: null,
-          duration_ms: null, total_tokens: msg.usage?.totalTokens ?? null, output_tokens: msg.usage?.output ?? null,
-          input_tokens: msg.usage?.input ?? null, cache_read_tokens: msg.usage?.cacheRead ?? null,
-          input_text_len: null, result_text_len: null, thinking_text_len: hasThinking ? null : (thinkingTextLen || null),
-          reply_text_len: replyTextLen || null, status: "ok", is_current: 0, is_stuck: 0,
+          step_id: `${entry.id}:reply`,
+          parent_step_id: entry.parentId,
+          session_key: sessionKey,
+          session_id: sessionId,
+          run_id: runId,
+          seq: seq++,
+          ts_epoch_ms: tsEpochMs,
+          role: "assistant",
+          node_type: "REPLY",
+          tool_name: null,
+          tool_call_id: null,
+          duration_ms: null,
+          total_tokens: msg.usage?.totalTokens ?? null,
+          output_tokens: msg.usage?.output ?? null,
+          input_tokens: msg.usage?.input ?? null,
+          cache_read_tokens: msg.usage?.cacheRead ?? null,
+          input_text_len: null,
+          result_text_len: null,
+          thinking_text_len: hasThinking ? null : thinkingTextLen || null,
+          reply_text_len: replyTextLen || null,
+          status: "ok",
+          is_current: 0,
+          is_stuck: 0,
         });
       }
     }
     if (msg.role === "toolResult") {
       const resultLen = Array.isArray(msg.content) ? msg.content.reduce((n, c) => n + (c.text?.length || 0), 0) : 0;
       current.push({
-        step_id: entry.id, parent_step_id: entry.parentId, session_key: sessionKey, session_id: sessionId, run_id: runId,
-        seq: seq++, ts_epoch_ms: tsEpochMs, role: "toolResult", node_type: "TOOL_CALL", tool_name: null, tool_call_id: null,
-        duration_ms: null, total_tokens: null, output_tokens: null, input_tokens: null, cache_read_tokens: null,
-        input_text_len: null, result_text_len: resultLen, thinking_text_len: null, reply_text_len: null,
-        status: "ok", is_current: 0, is_stuck: 0,
+        step_id: entry.id,
+        parent_step_id: entry.parentId,
+        session_key: sessionKey,
+        session_id: sessionId,
+        run_id: runId,
+        seq: seq++,
+        ts_epoch_ms: tsEpochMs,
+        role: "toolResult",
+        node_type: "TOOL_CALL",
+        tool_name: null,
+        tool_call_id: null,
+        duration_ms: null,
+        total_tokens: null,
+        output_tokens: null,
+        input_tokens: null,
+        cache_read_tokens: null,
+        input_text_len: null,
+        result_text_len: resultLen,
+        thinking_text_len: null,
+        reply_text_len: null,
+        status: "ok",
+        is_current: 0,
+        is_stuck: 0,
       });
     }
   }
@@ -383,8 +607,42 @@ function callPromptCheckRoute(key: string, query: Record<string, string>) {
 
 console.log("\n=== Setup: auth/session store + watcher ingest ===");
 upsertAuthSessions([
-  { sessionKey: parentKey, sessionId: parentSid, agentId: "demo", channel: "chat-direct", diag: "direct:local-parent", kind: "direct", label: null, model: "gpt-test", modelProvider: "openai", inputTokens: 0, outputTokens: 0, totalTokens: 0, contextTokens: 0, runtimeMode: "default", updatedAt: 0, ageMs: 0 },
-  { sessionKey: childKey, sessionId: childSid, agentId: "demo", channel: "subagent", diag: "subagent:local-child", kind: "subagent", label: null, model: "gpt-test", modelProvider: "openai", inputTokens: 9999, outputTokens: 888, totalTokens: 12345, contextTokens: 9999, runtimeMode: "default", updatedAt: 0, ageMs: 0 },
+  {
+    sessionKey: parentKey,
+    sessionId: parentSid,
+    agentId: "demo",
+    channel: "chat-direct",
+    diag: "direct:local-parent",
+    kind: "direct",
+    label: null,
+    model: "gpt-test",
+    modelProvider: "openai",
+    inputTokens: 0,
+    outputTokens: 0,
+    totalTokens: 0,
+    contextTokens: 0,
+    runtimeMode: "default",
+    updatedAt: 0,
+    ageMs: 0,
+  },
+  {
+    sessionKey: childKey,
+    sessionId: childSid,
+    agentId: "demo",
+    channel: "subagent",
+    diag: "subagent:local-child",
+    kind: "subagent",
+    label: null,
+    model: "gpt-test",
+    modelProvider: "openai",
+    inputTokens: 9999,
+    outputTokens: 888,
+    totalTokens: 12345,
+    contextTokens: 9999,
+    runtimeMode: "default",
+    updatedAt: 0,
+    ageMs: 0,
+  },
 ]);
 for (const [key, extra] of readSessionStoreExtras()) {
   if (extra.label) updateSessionLabel(key, extra.label);
@@ -401,19 +659,26 @@ const expected = [...parentExpected, ...childExpected];
 
 console.log("\n=== Group 1: canonical files only + exact step parity ===");
 {
-  const ingestRows = db.prepare("SELECT file_path, session_key, session_id FROM ingest_state ORDER BY file_path").all() as any[];
+  const ingestRows = db
+    .prepare("SELECT file_path, session_key, session_id FROM ingest_state ORDER BY file_path")
+    .all() as any[];
   eq(ingestRows.length, 2, "only canonical parent+child transcript files entered ingest_state");
-  assert(ingestRows.every(r => !/acp-stream|checkpoint|trajectory/.test(r.file_path)), "sidecar transcript files are skipped");
+  assert(
+    ingestRows.every((r) => !/acp-stream|checkpoint|trajectory/.test(r.file_path)),
+    "sidecar transcript files are skipped",
+  );
 
-  const rows = db.prepare(`
+  const rows = db
+    .prepare(`
     SELECT step_id, parent_step_id, session_key, session_id, run_id, seq, ts_epoch_ms,
            role, node_type, tool_name, tool_call_id, duration_ms, total_tokens,
            output_tokens, input_tokens, cache_read_tokens, input_text_len,
            result_text_len, thinking_text_len, reply_text_len, status, is_current, is_stuck
     FROM steps ORDER BY session_id, run_id, seq
-  `).all() as any[];
+  `)
+    .all() as any[];
   eq(rows.length, expected.length, "DB step count equals transcript oracle");
-  const byId = new Map(rows.map(r => [r.step_id, r]));
+  const byId = new Map(rows.map((r) => [r.step_id, r]));
   for (const e of expected) {
     const row = byId.get(e.step_id) as any;
     assert(row != null, `step ${e.step_id} exists in DB`);
@@ -423,13 +688,24 @@ console.log("\n=== Group 1: canonical files only + exact step parity ===");
     }
   }
   assert(!byId.has("sidecar-assistant:reply"), "sidecar assistant reply was not ingested");
-  assert(rows.every(r => (r.session_key === parentKey && r.session_id === parentSid) || (r.session_key === childKey && r.session_id === childSid)), "no step crossed session_key/session_id boundary");
+  assert(
+    rows.every(
+      (r) =>
+        (r.session_key === parentKey && r.session_id === parentSid) ||
+        (r.session_key === childKey && r.session_id === childSid),
+    ),
+    "no step crossed session_key/session_id boundary",
+  );
 }
 
 console.log("\n=== Group 2: session aggregates + token contract ===");
 {
-  const parent = db.prepare("SELECT * FROM sessions WHERE session_key = ? AND session_id = ?").get(parentKey, parentSid) as any;
-  const child = db.prepare("SELECT * FROM sessions WHERE session_key = ? AND session_id = ?").get(childKey, childSid) as any;
+  const parent = db
+    .prepare("SELECT * FROM sessions WHERE session_key = ? AND session_id = ?")
+    .get(parentKey, parentSid) as any;
+  const child = db
+    .prepare("SELECT * FROM sessions WHERE session_key = ? AND session_id = ?")
+    .get(childKey, childSid) as any;
   eq(parent.source, "transcript+auth", "parent source upgraded after transcript ingest");
   eq(parent.token_source, "transcript-backfill", "official-zero parent uses transcript backfill");
   eq(parent.total_tokens, 10450, "parent total_tokens comes from latest transcript usage");
@@ -457,7 +733,11 @@ console.log("\n=== Group 3: run selector + trace API projection ===");
   const dbRun2 = getTraceSpans(parentKey, parentRun2, parentSid);
   const nonToolResult = dbRun2.filter((r: any) => r.role !== "toolResult");
   eq(trace.payload.spans.length, nonToolResult.length, "trace API hides toolResult rows only");
-  eq(trace.payload.spans.map((s: any) => s.id).join(","), nonToolResult.map((s: any) => s.step_id).join(","), "trace span ids preserve DB step provenance");
+  eq(
+    trace.payload.spans.map((s: any) => s.id).join(","),
+    nonToolResult.map((s: any) => s.step_id).join(","),
+    "trace span ids preserve DB step provenance",
+  );
 }
 
 console.log("\n=== Group 4: context projection matches transcript usage ===");
@@ -482,46 +762,67 @@ console.log("\n=== Group 4: context projection matches transcript usage ===");
 console.log("\n=== Group 5: workflow graph projection + stuck attention ===");
 {
   const graph = getWorkflowGraph(parentKey, parentRun2, parentSid);
-  const types = graph.events.map(e => e.type);
+  const types = graph.events.map((e) => e.type);
   assert(types.includes("sessions_spawn_requested"), "workflow includes spawn request");
   assert(types.includes("sessions_spawn_accepted"), "workflow includes accepted childSessionKey/runId");
   assert(types.includes("sessions_yield"), "workflow includes sessions_yield");
   assert(types.includes("child_started"), "workflow includes exact child start");
   assert(types.includes("child_artifact_written"), "workflow includes child artifact write");
   assert(types.includes("child_final"), "workflow includes child final");
-  assert(types.includes("workflow_state_gap"), "workflow renders Workflow State/workflow-state gap instead of guessing");
+  assert(
+    types.includes("workflow_state_gap"),
+    "workflow renders Workflow State/workflow-state gap instead of guessing",
+  );
   assert(!types.includes("workflow_state_child_bound"), "workflow does not fabricate Workflow State child binding");
-  assert(graph.lanes.some(l => l.id === `child:${childKey}`), "child lane comes from exact accepted childSessionKey");
-  assert(!graph.lanes.some(l => l.id === `child:${unrelatedChildKey}`), "unrelated/sidecar child does not appear");
-  assert(graph.diagnostics.some(d => d.type === "workflow_state_unavailable"), "workflow gap diagnostic is emitted");
-  assert(graph.validation.checks.every(c => c.status !== "error"), "workflow self-validation has no error checks");
+  assert(
+    graph.lanes.some((l) => l.id === `child:${childKey}`),
+    "child lane comes from exact accepted childSessionKey",
+  );
+  assert(!graph.lanes.some((l) => l.id === `child:${unrelatedChildKey}`), "unrelated/sidecar child does not appear");
+  assert(
+    graph.diagnostics.some((d) => d.type === "workflow_state_unavailable"),
+    "workflow gap diagnostic is emitted",
+  );
+  assert(
+    graph.validation.checks.every((c) => c.status !== "error"),
+    "workflow self-validation has no error checks",
+  );
   eq(graph.attention.status, "stuck", "workflow attention marks yielded parent as stuck");
   assert(graph.attention.title.includes("Parent yielded"), "workflow attention points to yield/child merge");
   eq(graph.attention.childSessionKey, childKey, "workflow attention names exact child session key");
 
   const workflowApi = callWorkflowRoute(parentKey, { runId: parentRun2, sessionId: parentSid });
   eq(workflowApi.status, 200, "workflow API route returns 200");
-  assert(workflowApi.payload.events.some((e: any) => e.type === "sessions_spawn_accepted"), "workflow API includes accepted child event");
+  assert(
+    workflowApi.payload.events.some((e: any) => e.type === "sessions_spawn_accepted"),
+    "workflow API includes accepted child event",
+  );
   eq(workflowApi.payload.attention.childSessionKey, childKey, "workflow API attention preserves child session key");
 }
 
 console.log("\n=== Group 6: prompt check + hook reminder consistency ===");
 {
   const prompt = getPromptCheck(parentKey, parentRun2, parentSid);
-  const checkpointRule = prompt.rules.find(r => r.ruleId === "checkpoint_before_sessions_yield");
+  const checkpointRule = prompt.rules.find((r) => r.ruleId === "checkpoint_before_sessions_yield");
   assert(checkpointRule != null, "prompt check evaluates checkpoint-before-yield rule");
   eq(checkpointRule?.status, "ok", "checkpoint-before-yield matches transcript evidence");
-  assert((checkpointRule?.evidenceStepIds || []).includes("a-parent-5:tc-yield"), "checkpoint rule provenance includes yield step");
+  assert(
+    (checkpointRule?.evidenceStepIds || []).includes("a-parent-5:tc-yield"),
+    "checkpoint rule provenance includes yield step",
+  );
   eq(prompt.hooks.length, 1, "prompt check only attaches hook events from the selected run");
   eq(prompt.hooks[0]?.hookId, "research-checkpoint-before-yield", "bound hook reminder is visible");
   eq(prompt.hooks[0]?.status, "bound", "hook reminder has session/run/step binding");
   eq(prompt.hooks[0]?.relatedStepId, "a-parent-5:tc-yield", "hook reminder keeps related step provenance");
-  assert(!prompt.hooks.some(h => h.runId === "unrelated-run"), "hook reminder from another run is not attached");
+  assert(!prompt.hooks.some((h) => h.runId === "unrelated-run"), "hook reminder from another run is not attached");
 
   const promptApi = callPromptCheckRoute(parentKey, { runId: parentRun2, sessionId: parentSid });
   eq(promptApi.status, 200, "prompt-check API route returns 200");
   eq(promptApi.payload.hooks.length, 1, "prompt-check API only exposes selected-run hook");
-  assert(promptApi.payload.rules.some((r: any) => r.ruleId === "checkpoint_before_sessions_yield" && r.status === "ok"), "prompt-check API rule result matches transcript");
+  assert(
+    promptApi.payload.rules.some((r: any) => r.ruleId === "checkpoint_before_sessions_yield" && r.status === "ok"),
+    "prompt-check API rule result matches transcript",
+  );
 }
 
 console.log("\n=== Group 7: idempotent local E2E replay ===");

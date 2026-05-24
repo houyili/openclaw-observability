@@ -39,9 +39,9 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, chmodSync, rmSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import vm from "node:vm";
 
@@ -53,8 +53,10 @@ let passed = 0;
 let failed = 0;
 const failures: string[] = [];
 function assert(cond: boolean, name: string, detail?: string) {
-  if (cond) { passed++; console.log(`  ✅ ${name}`); }
-  else {
+  if (cond) {
+    passed++;
+    console.log(`  ✅ ${name}`);
+  } else {
     failed++;
     console.log(`  ❌ ${name}${detail ? ` — ${detail}` : ""}`);
     failures.push(name);
@@ -74,8 +76,7 @@ console.log("\n=== Layer 1: computeRefreshIndicator (pure) ===");
   ctx.globalThis = ctx;
   vm.createContext(ctx);
   vm.runInContext(code, ctx);
-  const computeRefreshIndicator = ctx.computeRefreshIndicator as
-    (h: any) => { text: string; className: string };
+  const computeRefreshIndicator = ctx.computeRefreshIndicator as (h: any) => { text: string; className: string };
   if (typeof computeRefreshIndicator !== "function") {
     throw new Error("vm load did not expose computeRefreshIndicator");
   }
@@ -92,8 +93,11 @@ console.log("\n=== Layer 1: computeRefreshIndicator (pure) ===");
     authPoll: { stale: true, lastSuccessAgeMs: 137_000, lastError: "Command failed: openclaw timed out" },
   });
   assert(stale.className === "stale", "stale: pill class is 'stale'");
-  assert(stale.text.startsWith("⚠ auth-poll stale (137s)"), "stale: text encodes age in seconds",
-    `got "${stale.text}"`);
+  assert(
+    stale.text.startsWith("⚠ auth-poll stale (137s)"),
+    "stale: text encodes age in seconds",
+    `got "${stale.text}"`,
+  );
   assert(stale.text.includes("Command failed"), "stale: text includes error prefix");
 
   // Case C: stale, never succeeded
@@ -112,8 +116,7 @@ console.log("\n=== Layer 1: computeRefreshIndicator (pure) ===");
     authPoll: { stale: true, lastSuccessAgeMs: 0, lastError: longErr },
   });
   // " — " (3) + 60 chars = 63 chars after the "(0s)" segment
-  assert(truncated.text.length < 100, "long error truncates pill text",
-    `got length ${truncated.text.length}`);
+  assert(truncated.text.length < 100, "long error truncates pill text", `got length ${truncated.text.length}`);
 }
 
 // ─── Layer 2 + 3: child process with broken openclaw bin ────────
@@ -164,14 +167,7 @@ console.log("\n=== Layer 2 + 3: auth-poller + /healthz under broken CLI ===");
   // top-level await + dynamic import.
   const result = spawnSync(
     process.execPath,
-    [
-      "--experimental-sqlite",
-      "--experimental-strip-types",
-      "--no-warnings",
-      "--input-type=module",
-      "-e",
-      childSrc,
-    ],
+    ["--experimental-sqlite", "--experimental-strip-types", "--no-warnings", "--input-type=module", "-e", childSrc],
     { encoding: "utf-8", timeout: 30_000 },
   );
 
@@ -181,15 +177,15 @@ console.log("\n=== Layer 2 + 3: auth-poller + /healthz under broken CLI ===");
     if (result.status === 0 && result.stdout) {
       parsed = JSON.parse(result.stdout);
     }
-  } catch (err) {
+  } catch (_err) {
     /* will be caught by assertion */
   }
 
   if (result.status !== 0 || !parsed) {
     console.log("  child stderr:");
-    console.log("    " + (result.stderr || "(empty)").split("\n").join("\n    "));
+    console.log(`    ${(result.stderr || "(empty)").split("\n").join("\n    ")}`);
     console.log("  child stdout:");
-    console.log("    " + (result.stdout || "(empty)").split("\n").join("\n    "));
+    console.log(`    ${(result.stdout || "(empty)").split("\n").join("\n    ")}`);
   }
 
   assert(result.status === 0, "child process exited cleanly", `exit ${result.status}`);
@@ -202,8 +198,7 @@ console.log("\n=== Layer 2 + 3: auth-poller + /healthz under broken CLI ===");
     // Layer 2 — getAuthPollStatus()
     assert(status.lastSuccessAt == null, "auth-poller never recorded a success");
     assert(status.lastFailureAt != null, "auth-poller recorded a failure");
-    assert(typeof status.lastError === "string" && status.lastError.length > 0,
-      "auth-poller captured an error string");
+    assert(typeof status.lastError === "string" && status.lastError.length > 0, "auth-poller captured an error string");
     assert(status.inFlight === false, "auth-poller in-flight flag cleared after callback");
 
     // Layer 3 — handleHealthRoute() shape
@@ -216,7 +211,11 @@ console.log("\n=== Layer 2 + 3: auth-poller + /healthz under broken CLI ===");
   }
 
   // Tidy up the temp workspace.
-  try { rmSync(work, { recursive: true, force: true }); } catch { /* best effort */ }
+  try {
+    rmSync(work, { recursive: true, force: true });
+  } catch {
+    /* best effort */
+  }
 }
 
 // ─── Summary ────────────────────────────────────────────────────

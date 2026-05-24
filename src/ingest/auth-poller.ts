@@ -1,14 +1,16 @@
-import { execSync, exec } from "node:child_process";
-import { readFileSync, readdirSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { exec, execSync } from "node:child_process";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
+import { join } from "node:path";
 import { CONFIG } from "../config.ts";
 
 /** Resolve the openclaw binary — try PATH first, fallback to common locations. */
 function resolveOpenclawBin(): string {
   try {
     return execSync("which openclaw", { encoding: "utf-8", timeout: 5_000 }).trim();
-  } catch { /* not in PATH */ }
+  } catch {
+    /* not in PATH */
+  }
   const candidates = [
     join(homedir(), ".npm-global/bin/openclaw"),
     "/usr/local/bin/openclaw",
@@ -34,8 +36,8 @@ export interface AuthSession {
   outputTokens: number;
   totalTokens: number;
   contextTokens: number;
-  diag: string;         // who/which group - extracted from session_key
-  runtimeMode: string;  // merged thinking/fast/verbose/reasoning
+  diag: string; // who/which group - extracted from session_key
+  runtimeMode: string; // merged thinking/fast/verbose/reasoning
   updatedAt: number;
   ageMs: number;
   channel: string;
@@ -93,10 +95,10 @@ export function pollAuthSessionsAsync(callback: (sessions: AuthSession[]) => voi
 export function pollAuthSessions(): AuthSession[] {
   let raw: string;
   try {
-    raw = execSync(
-      `${OPENCLAW_BIN} sessions --all-agents --active ${CONFIG.AUTH_ACTIVE_MINUTES} --json`,
-      { timeout: CONFIG.EXTERNAL_TIMEOUT_MS, encoding: "utf-8" },
-    );
+    raw = execSync(`${OPENCLAW_BIN} sessions --all-agents --active ${CONFIG.AUTH_ACTIVE_MINUTES} --json`, {
+      timeout: CONFIG.EXTERNAL_TIMEOUT_MS,
+      encoding: "utf-8",
+    });
   } catch (err) {
     console.error("[auth-poller] Failed:", (err as Error).message?.slice(0, 120));
     return [];
@@ -225,7 +227,9 @@ export function readSessionStoreExtras(): Map<string, SessionStoreExtra> {
           parentSessionId: null, // resolved in pass 2
         });
       }
-    } catch { /* skip unreadable stores */ }
+    } catch {
+      /* skip unreadable stores */
+    }
   }
 
   // Pass 2: resolve parentSessionId by looking up spawnedBy key in the map

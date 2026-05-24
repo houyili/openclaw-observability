@@ -1,6 +1,6 @@
-import { DatabaseSync } from "node:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { CONFIG } from "../config.ts";
 
 let _db: DatabaseSync | null = null;
@@ -102,17 +102,23 @@ function migrate(db: DatabaseSync): void {
   ensureColumn(db, "sessions", "parent_session_id", "TEXT");
   ensureColumn(db, "sessions", "token_source", "TEXT DEFAULT 'official'");
 
-  ensureColumn(db, "steps", "input_tokens",       "INTEGER");  // usage.input on MODEL_THINK / REPLY
-  ensureColumn(db, "steps", "cache_read_tokens",  "INTEGER");  // usage.cacheRead on MODEL_THINK / REPLY
-  ensureColumn(db, "steps", "thinking_text_len",  "INTEGER");  // chars in content[].type='thinking'
-  ensureColumn(db, "steps", "reply_text_len",     "INTEGER");  // full chars of REPLY text content
-  ensureColumn(db, "steps", "session_id",         "TEXT");     // transcript/runtime session UUID
+  ensureColumn(db, "steps", "input_tokens", "INTEGER"); // usage.input on MODEL_THINK / REPLY
+  ensureColumn(db, "steps", "cache_read_tokens", "INTEGER"); // usage.cacheRead on MODEL_THINK / REPLY
+  ensureColumn(db, "steps", "thinking_text_len", "INTEGER"); // chars in content[].type='thinking'
+  ensureColumn(db, "steps", "reply_text_len", "INTEGER"); // full chars of REPLY text content
+  ensureColumn(db, "steps", "session_id", "TEXT"); // transcript/runtime session UUID
 
   // Indexes
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_sessions_parent ON sessions(parent_session_key) WHERE parent_session_key IS NOT NULL`);
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_sessions_parent_sid ON sessions(parent_session_id) WHERE parent_session_id IS NOT NULL`);
+  db.exec(
+    `CREATE INDEX IF NOT EXISTS idx_sessions_parent ON sessions(parent_session_key) WHERE parent_session_key IS NOT NULL`,
+  );
+  db.exec(
+    `CREATE INDEX IF NOT EXISTS idx_sessions_parent_sid ON sessions(parent_session_id) WHERE parent_session_id IS NOT NULL`,
+  );
   db.exec(`CREATE INDEX IF NOT EXISTS idx_steps_session_run ON steps(session_key, run_id, seq)`);
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_steps_session_id_run ON steps(session_id, run_id, seq) WHERE session_id IS NOT NULL`);
+  db.exec(
+    `CREATE INDEX IF NOT EXISTS idx_steps_session_id_run ON steps(session_id, run_id, seq) WHERE session_id IS NOT NULL`,
+  );
   db.exec(`CREATE INDEX IF NOT EXISTS idx_steps_ts ON steps(ts_epoch_ms)`);
   // Covers `WHERE session_key = ? ORDER BY ts_epoch_ms DESC LIMIT 1` which powers
   // recomputeAllSessionOps (hot loop). Without this, the OR-LIKE ancestor query
@@ -164,8 +170,12 @@ function migrate(db: DatabaseSync): void {
       raw_json        TEXT
     )
   `);
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_hook_events_session ON hook_events(session_key, session_id, run_id, ts_epoch_ms)`);
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_hook_events_step ON hook_events(related_step_id) WHERE related_step_id IS NOT NULL`);
+  db.exec(
+    `CREATE INDEX IF NOT EXISTS idx_hook_events_session ON hook_events(session_key, session_id, run_id, ts_epoch_ms)`,
+  );
+  db.exec(
+    `CREATE INDEX IF NOT EXISTS idx_hook_events_step ON hook_events(related_step_id) WHERE related_step_id IS NOT NULL`,
+  );
 }
 
 export function closeDb(): void {

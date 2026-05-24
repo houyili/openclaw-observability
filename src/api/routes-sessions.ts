@@ -1,16 +1,16 @@
 import type { ServerResponse } from "node:http";
-import { getAllSessions, getSession, getChildCounts, getParentInfoBatch } from "../storage/sessions-repo.ts";
-import { getLatestRun, getRunList, getTraceSpans, getActivityBars } from "../storage/steps-repo.ts";
 import { getContextBoth } from "../storage/context-repo.ts";
-import { getWorkflowGraph } from "../storage/workflow-repo.ts";
 import { getPromptCheck } from "../storage/prompt-check-repo.ts";
+import { getAllSessions, getChildCounts, getParentInfoBatch, getSession } from "../storage/sessions-repo.ts";
+import { getActivityBars, getLatestRun, getRunList, getTraceSpans } from "../storage/steps-repo.ts";
+import { getWorkflowGraph } from "../storage/workflow-repo.ts";
 
 type SendJson = (res: ServerResponse, data: unknown, status?: number) => void;
 
 export const handleSessionsRoutes = {
   list(query: Record<string, string>, res: ServerResponse, sendJson: SendJson) {
     const isCron = query.tab === "cron" ? true : query.tab === "sessions" ? false : undefined;
-    const pageSize = isCron === true ? 10 : (query.tab === "sessions" ? 15 : 15);
+    const pageSize = isCron === true ? 10 : query.tab === "sessions" ? 15 : 15;
     const { sessions, total, page } = getAllSessions({
       channel: query.channel,
       agent: query.agent,
@@ -21,17 +21,17 @@ export const handleSessionsRoutes = {
       parentKey: query.parentKey,
       parentId: query.parentId,
       isCron,
-      page: query.page ? parseInt(query.page) : 1,
-      pageSize: query.pageSize ? parseInt(query.pageSize) : pageSize,
+      page: query.page ? parseInt(query.page, 10) : 1,
+      pageSize: query.pageSize ? parseInt(query.pageSize, 10) : pageSize,
     });
 
     // Batch-fetch child counts (by session_id) and parent display info.
-    const allSessionIds = sessions.map(s => s.session_id).filter(Boolean) as string[];
+    const allSessionIds = sessions.map((s) => s.session_id).filter(Boolean) as string[];
     const childCounts = getChildCounts(allSessionIds);
-    const parentSessionIds = [...new Set(sessions.map(s => s.parent_session_id).filter(Boolean))] as string[];
+    const parentSessionIds = [...new Set(sessions.map((s) => s.parent_session_id).filter(Boolean))] as string[];
     const parentInfo = getParentInfoBatch(parentSessionIds);
 
-    const result = sessions.map(s => {
+    const result = sessions.map((s) => {
       const latestRun = getLatestRun(s.session_key, s.session_id);
       const activityBars = getActivityBars(s.session_key, s.session_id);
 
@@ -71,18 +71,20 @@ export const handleSessionsRoutes = {
         updatedAt: s.updated_at,
         parentSessionKey: s.parent_session_key || null,
         parentSessionId: s.parent_session_id || null,
-        parentDiag: s.parent_session_id ? (parentInfo.get(s.parent_session_id)?.diag || null) : null,
-        parentLabel: s.parent_session_id ? (parentInfo.get(s.parent_session_id)?.label || null) : null,
-        parentAgentId: s.parent_session_id ? (parentInfo.get(s.parent_session_id)?.agentId || null) : null,
+        parentDiag: s.parent_session_id ? parentInfo.get(s.parent_session_id)?.diag || null : null,
+        parentLabel: s.parent_session_id ? parentInfo.get(s.parent_session_id)?.label || null : null,
+        parentAgentId: s.parent_session_id ? parentInfo.get(s.parent_session_id)?.agentId || null : null,
         childCount: childCounts.get(s.session_id) || 0,
-        latestRun: latestRun ? {
-          runId: latestRun.run_id,
-          startedAt: latestRun.started_at,
-          durationMs: latestRun.duration_ms,
-          modelSteps: latestRun.model_steps,
-          toolSteps: latestRun.tool_steps,
-          status: latestRun.status,
-        } : null,
+        latestRun: latestRun
+          ? {
+              runId: latestRun.run_id,
+              startedAt: latestRun.started_at,
+              durationMs: latestRun.duration_ms,
+              modelSteps: latestRun.model_steps,
+              toolSteps: latestRun.tool_steps,
+              status: latestRun.status,
+            }
+          : null,
         activityBars,
       };
     });
@@ -126,7 +128,7 @@ export const handleSessionsRoutes = {
       const end = (s as any).ts_epoch_ms + ((s as any).duration_ms || 0);
       if (end > maxEndTs) maxEndTs = end;
     }
-    const lastTs = maxEndTs;
+    const _lastTs = maxEndTs;
 
     // Recompute start/duration for correct timeline:
     // MODEL_THINK: starts after prev step ends, ends when assistant message arrives
@@ -156,7 +158,7 @@ export const handleSessionsRoutes = {
     }
 
     // Recalculate traceDuration from adjusted spans
-    const adjustedMaxEnd = Math.max(...adjustedSpans.map(a => a.startMs + a.durMs), 1);
+    const adjustedMaxEnd = Math.max(...adjustedSpans.map((a) => a.startMs + a.durMs), 1);
 
     const mappedSpans = adjustedSpans.map(({ s, startMs, durMs }) => ({
       id: s.step_id,
@@ -189,7 +191,7 @@ export const handleSessionsRoutes = {
       startedAt: (spans[0] as any).ts,
       traceDurationMs: adjustedMaxEnd,
       spans: mappedSpans,
-      runs: runs.map(r => ({
+      runs: runs.map((r) => ({
         runId: r.run_id,
         startedAt: r.started_at,
         durationMs: r.duration_ms,
@@ -226,7 +228,7 @@ export const handleSessionsRoutes = {
       runId: breakdown.runId,
       breakdown,
       timeline,
-      runs: runs.map(r => ({
+      runs: runs.map((r) => ({
         runId: r.run_id,
         startedAt: r.started_at,
         durationMs: r.duration_ms,

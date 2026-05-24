@@ -15,16 +15,18 @@
  *     tests/parent-child.test.ts
  */
 
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 let passed = 0;
 let failed = 0;
 const failures: string[] = [];
 function assert(cond: boolean, name: string, detail?: string) {
-  if (cond) { passed++; console.log(`  \u2705 ${name}`); }
-  else {
+  if (cond) {
+    passed++;
+    console.log(`  \u2705 ${name}`);
+  } else {
     failed++;
     console.log(`  \u274c ${name}${detail ? ` \u2014 ${detail}` : ""}`);
     failures.push(name);
@@ -39,24 +41,26 @@ mkdirSync(join(tmpHome, "agents/main/sessions"), { recursive: true });
 process.env.OPENCLAW_HOME = tmpHome;
 
 const { getDb, closeDb } = await import("../src/storage/db.ts");
-const {
-  updateSessionParent,
-  getChildCounts,
-  getChildSessions,
-  getParentInfoBatch,
-  getAllSessions,
-} = await import("../src/storage/sessions-repo.ts");
+const { updateSessionParent, getChildCounts, getChildSessions, getParentInfoBatch, getAllSessions } = await import(
+  "../src/storage/sessions-repo.ts"
+);
 const { readSessionStoreExtras } = await import("../src/ingest/auth-poller.ts");
 
 const db = getDb();
 const now = Date.now();
 
 // Helper: insert a session row
-function insertSession(key: string, sid: string, opts: {
-  agentId?: string; channel?: string;
-  parentSessionKey?: string; parentSessionId?: string;
-  updatedAt?: number;
-} = {}) {
+function insertSession(
+  key: string,
+  sid: string,
+  opts: {
+    agentId?: string;
+    channel?: string;
+    parentSessionKey?: string;
+    parentSessionId?: string;
+    updatedAt?: number;
+  } = {},
+) {
   db.prepare(`INSERT INTO sessions
     (session_key, session_id, agent_id, channel, diag, kind, model,
      input_tokens, output_tokens, total_tokens, context_tokens,
@@ -64,7 +68,8 @@ function insertSession(key: string, sid: string, opts: {
     VALUES (?, ?, ?, ?, 'test', 'direct', 'gpt-5',
      0, 0, 0, 0, ?, 0, 'auth-only', ?, ?)
   `).run(
-    key, sid,
+    key,
+    sid,
     opts.agentId ?? "test",
     opts.channel ?? "subagent",
     opts.updatedAt ?? now,
@@ -80,14 +85,14 @@ console.log("\n=== Group 1: Schema migration ===");
   // parent_session_key column should exist
   const cols = db.prepare("PRAGMA table_info(sessions)").all() as Array<{ name: string }>;
   assert(
-    cols.some(c => c.name === "parent_session_key"),
+    cols.some((c) => c.name === "parent_session_key"),
     "parent_session_key column exists in sessions table",
   );
 
   // Index should exist
   const indexes = db.prepare("PRAGMA index_list(sessions)").all() as Array<{ name: string }>;
   assert(
-    indexes.some(idx => idx.name === "idx_sessions_parent"),
+    indexes.some((idx) => idx.name === "idx_sessions_parent"),
     "idx_sessions_parent index exists",
   );
 
@@ -117,14 +122,18 @@ console.log("\n=== Group 2: updateSessionParent ===");
 
   // Set parent (with session_id)
   updateSessionParent(childKey, parentKey, "sid-p1");
-  const row1 = db.prepare("SELECT parent_session_key, parent_session_id FROM sessions WHERE session_key = ?").get(childKey) as any;
+  const row1 = db
+    .prepare("SELECT parent_session_key, parent_session_id FROM sessions WHERE session_key = ?")
+    .get(childKey) as any;
   assert(row1.parent_session_key === parentKey, "updateSessionParent sets parent_session_key correctly");
   assert(row1.parent_session_id === "sid-p1", "updateSessionParent sets parent_session_id correctly");
 
   // Idempotent: calling again with a DIFFERENT parent should NOT overwrite key
   const otherParent = "agent:main:cron:other-parent";
   updateSessionParent(childKey, otherParent, "sid-other");
-  const row2 = db.prepare("SELECT parent_session_key, parent_session_id FROM sessions WHERE session_key = ?").get(childKey) as any;
+  const row2 = db
+    .prepare("SELECT parent_session_key, parent_session_id FROM sessions WHERE session_key = ?")
+    .get(childKey) as any;
   assert(
     row2.parent_session_key === parentKey,
     "updateSessionParent does NOT overwrite existing parent key",
@@ -133,7 +142,11 @@ console.log("\n=== Group 2: updateSessionParent ===");
 
   // Session not in DB: should be a no-op (no error)
   let noError = true;
-  try { updateSessionParent("nonexistent:key", parentKey, "sid-p1"); } catch { noError = false; }
+  try {
+    updateSessionParent("nonexistent:key", parentKey, "sid-p1");
+  } catch {
+    noError = false;
+  }
   assert(noError, "updateSessionParent on missing session is a no-op (no error)");
 }
 
@@ -180,11 +193,11 @@ console.log("\n=== Group 4: getChildSessions ===");
   assert(children.length === 3, "getChildSessions returns 3 children", `got ${children.length}`);
 
   // All children should have correct parent session_id
-  const allCorrectParent = children.every(c => c.parent_session_id === "sid-p1");
+  const allCorrectParent = children.every((c) => c.parent_session_id === "sid-p1");
   assert(allCorrectParent, "all children point to correct parent session_id");
 
   // Children are ordered by updated_at DESC
-  const times = children.map(c => c.updated_at);
+  const times = children.map((c) => c.updated_at);
   const isSorted = times.every((t, i) => i === 0 || t <= times[i - 1]);
   assert(isSorted, "children ordered by updated_at DESC");
 
@@ -215,15 +228,9 @@ console.log("\n=== Group 5: readSessionStoreExtras extracts spawnedBy ===");
       spawnedBy: "agent:demo:chat:group:oc_fakechat1",
     },
   };
-  writeFileSync(
-    join(tmpHome, "agents/demo/sessions/sessions.json"),
-    JSON.stringify(sessionsJson),
-  );
+  writeFileSync(join(tmpHome, "agents/demo/sessions/sessions.json"), JSON.stringify(sessionsJson));
   // Write empty for main agent
-  writeFileSync(
-    join(tmpHome, "agents/main/sessions/sessions.json"),
-    JSON.stringify({}),
-  );
+  writeFileSync(join(tmpHome, "agents/main/sessions/sessions.json"), JSON.stringify({}));
 
   const extras = readSessionStoreExtras();
 
@@ -232,10 +239,7 @@ console.log("\n=== Group 5: readSessionStoreExtras extracts spawnedBy ===");
   assert(ex1 !== undefined, "sub-x1 found in extras");
   assert(ex1?.label === "research sub 1", "sub-x1 label correct");
   assert(ex1?.sessionId === "sid-x1", "sub-x1 own sessionId extracted");
-  assert(
-    ex1?.parentSessionKey === "agent:demo:chat:group:oc_fakechat1",
-    "sub-x1 spawnedBy (key) extracted correctly",
-  );
+  assert(ex1?.parentSessionKey === "agent:demo:chat:group:oc_fakechat1", "sub-x1 spawnedBy (key) extracted correctly");
   assert(
     ex1?.parentSessionId === "sid-gc1",
     "sub-x1 parentSessionId resolved from parent entry",
@@ -317,7 +321,9 @@ console.log("\n=== Group 8: updateSessionParent only writes when NULL ===");
 
   // First write succeeds
   updateSessionParent(key, parent1, "sid-parent1");
-  let row = db.prepare("SELECT parent_session_key, parent_session_id FROM sessions WHERE session_key = ?").get(key) as any;
+  let row = db
+    .prepare("SELECT parent_session_key, parent_session_id FROM sessions WHERE session_key = ?")
+    .get(key) as any;
   assert(row.parent_session_key === parent1, "guard: first write sets parent key");
   assert(row.parent_session_id === "sid-parent1", "guard: first write sets parent session_id");
 
@@ -344,7 +350,9 @@ console.log("\n=== Group 9: getParentInfoBatch ===");
   const parent2 = "agent:demo:cron:info-parent2";
   insertSession(parent1, "sid-ip1", { channel: "chat-group", agentId: "main" });
   // Set label on parent1
-  db.prepare("UPDATE sessions SET label = 'My Research Group', diag = 'group:oc_abc123' WHERE session_key = ?").run(parent1);
+  db.prepare("UPDATE sessions SET label = 'My Research Group', diag = 'group:oc_abc123' WHERE session_key = ?").run(
+    parent1,
+  );
 
   insertSession(parent2, "sid-ip2", { channel: "cron", agentId: "demo" });
   db.prepare("UPDATE sessions SET diag = 'cron:deadbeef' WHERE session_key = ?").run(parent2);
@@ -380,14 +388,15 @@ console.log("\n=== Group 10: getAllSessions with parentKey filter ===");
   insertSession("agent:main:subagent:filter-c1", "sid-fc1", { parentSessionKey: parent, agentId: "main" });
   insertSession("agent:main:subagent:filter-c2", "sid-fc2", { parentSessionKey: parent, agentId: "main" });
   insertSession("agent:main:subagent:other-child", "sid-oc", {
-    parentSessionKey: "agent:main:cron:other-parent", agentId: "main",
+    parentSessionKey: "agent:main:cron:other-parent",
+    agentId: "main",
   });
 
   // Filter by parentKey
   const result = getAllSessions({ parentKey: parent });
   assert(result.total === 2, "parentKey filter returns 2 children", `got ${result.total}`);
   assert(
-    result.sessions.every(s => s.parent_session_key === parent),
+    result.sessions.every((s) => s.parent_session_key === parent),
     "all filtered sessions have correct parent",
   );
 
@@ -404,7 +413,11 @@ console.log("\n=== Group 10: getAllSessions with parentKey filter ===");
 // Cleanup & summary
 // ================================================================
 closeDb();
-try { rmSync(tmpHome, { recursive: true }); } catch { /* best-effort */ }
+try {
+  rmSync(tmpHome, { recursive: true });
+} catch {
+  /* best-effort */
+}
 
 console.log(`\n${"=".repeat(50)}`);
 console.log(`Parent-child: ${passed} passed, ${failed} failed`);

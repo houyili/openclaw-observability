@@ -1,6 +1,6 @@
-import { getDb } from "./db.ts";
-import type { AuthSession } from "../ingest/auth-poller.ts";
 import { CONFIG } from "../config.ts";
+import type { AuthSession } from "../ingest/auth-poller.ts";
+import { getDb } from "./db.ts";
 
 export function upsertAuthSessions(sessions: AuthSession[]): void {
   const db = getDb();
@@ -31,10 +31,27 @@ export function upsertAuthSessions(sessions: AuthSession[]): void {
       END
   `);
   for (const s of sessions) {
-    const tokenSource = (s.totalTokens || s.inputTokens || s.outputTokens || s.contextTokens) ? "official" : "official-zero";
-    stmt.run(s.sessionKey, s.sessionId, s.agentId, s.channel, s.diag, s.label, s.kind,
-      s.model, s.modelProvider, s.inputTokens, s.outputTokens, s.totalTokens, s.contextTokens,
-      s.runtimeMode, s.updatedAt, s.ageMs, tokenSource);
+    const tokenSource =
+      s.totalTokens || s.inputTokens || s.outputTokens || s.contextTokens ? "official" : "official-zero";
+    stmt.run(
+      s.sessionKey,
+      s.sessionId,
+      s.agentId,
+      s.channel,
+      s.diag,
+      s.label,
+      s.kind,
+      s.model,
+      s.modelProvider,
+      s.inputTokens,
+      s.outputTokens,
+      s.totalTokens,
+      s.contextTokens,
+      s.runtimeMode,
+      s.updatedAt,
+      s.ageMs,
+      tokenSource,
+    );
   }
 }
 
@@ -115,12 +132,19 @@ export function recomputeAllSessionCounts(): void {
     const tok = tokenStmt.get(baseKey) as any;
     const latest = latestStepStmt.get(baseKey) as any;
     updateStmt.run(
-      row.llm || 0, row.tool || 0, row.skill || 0, row.mcp || 0,
-      tok?.total_tok || 0, tok?.input_tok || 0, tok?.output_tok || 0, tok?.context_tok || 0,
+      row.llm || 0,
+      row.tool || 0,
+      row.skill || 0,
+      row.mcp || 0,
+      tok?.total_tok || 0,
+      tok?.input_tok || 0,
+      tok?.output_tok || 0,
+      tok?.context_tok || 0,
       tok?.total_tok || 0,
       latest?.latest || 0,
       row.total || 0,
-      baseKey, baseKey + ":run:%",
+      baseKey,
+      `${baseKey}:run:%`,
     );
   }
 }
@@ -141,7 +165,8 @@ export function recomputeAllSessionCounts(): void {
 export function recomputeSessionCounts(sessionKey: string): void {
   const db = getDb();
   const baseKey = toBaseKey(sessionKey);
-  const row = db.prepare(`
+  const row = db
+    .prepare(`
     SELECT
       SUM(CASE WHEN node_type = 'MODEL_THINK' THEN 1 ELSE 0 END) as llm,
       SUM(CASE WHEN role = 'assistant' AND node_type NOT IN ('MODEL_THINK','REPLY') THEN 1 ELSE 0 END) as tool,
@@ -149,23 +174,28 @@ export function recomputeSessionCounts(sessionKey: string): void {
       SUM(CASE WHEN mcp_tool IS NOT NULL AND role = 'assistant' THEN 1 ELSE 0 END) as mcp,
       COUNT(*) as total
     FROM steps WHERE session_key = ?
-  `).get(baseKey) as any;
+  `)
+    .get(baseKey) as any;
   if (!row) return;
 
   // Token aggregation from steps (backfill when auth-poller left values at 0).
-  const tok = db.prepare(`
+  const tok = db
+    .prepare(`
     SELECT
       MAX(total_tokens)  as total_tok,
       MAX(input_tokens)  as input_tok,
       SUM(CASE WHEN node_type IN ('MODEL_THINK','REPLY') THEN output_tokens ELSE 0 END) as output_tok,
       MAX(CASE WHEN node_type IN ('MODEL_THINK','REPLY') THEN input_tokens ELSE 0 END) as context_tok
     FROM steps WHERE session_key = ? AND total_tokens IS NOT NULL
-  `).get(baseKey) as any;
+  `)
+    .get(baseKey) as any;
 
   // Latest step ts — refresh updated_at for sessions not covered by auth-poller
-  const latest = db.prepare(`
+  const latest = db
+    .prepare(`
     SELECT MAX(ts_epoch_ms) as latest FROM steps WHERE session_key = ?
-  `).get(baseKey) as any;
+  `)
+    .get(baseKey) as any;
 
   db.prepare(`
     UPDATE sessions SET
@@ -182,12 +212,19 @@ export function recomputeSessionCounts(sessionKey: string): void {
       source = CASE WHEN ? > 0 THEN 'transcript+auth' ELSE source END
     WHERE session_key = ? OR session_key LIKE ?
   `).run(
-    row.llm || 0, row.tool || 0, row.skill || 0, row.mcp || 0,
-    tok?.total_tok || 0, tok?.input_tok || 0, tok?.output_tok || 0, tok?.context_tok || 0,
+    row.llm || 0,
+    row.tool || 0,
+    row.skill || 0,
+    row.mcp || 0,
+    tok?.total_tok || 0,
+    tok?.input_tok || 0,
+    tok?.output_tok || 0,
+    tok?.context_tok || 0,
     tok?.total_tok || 0,
     latest?.latest || 0,
     row.total || 0,
-    baseKey, baseKey + ":run:%",
+    baseKey,
+    `${baseKey}:run:%`,
   );
 }
 
@@ -196,7 +233,11 @@ export function updateSessionLabel(sessionKey: string, label: string): void {
 }
 
 /** Set parent info. parent_session_key is write-once; parent_session_id can be backfilled later. */
-export function updateSessionParent(sessionKey: string, parentSessionKey: string, parentSessionId: string | null): void {
+export function updateSessionParent(
+  sessionKey: string,
+  parentSessionKey: string,
+  parentSessionId: string | null,
+): void {
   const db = getDb();
   // Set parent_session_key (write-once)
   db.prepare(`
@@ -232,7 +273,9 @@ export function getChildCounts(parentSessionIds: string[]): Map<string, number> 
  * Batch-fetch parent session info for display (diag, label, agentId).
  * Returns a map: parentSessionId → { diag, label, agentId }.
  */
-export function getParentInfoBatch(parentSessionIds: string[]): Map<string, { diag: string; label: string | null; agentId: string }> {
+export function getParentInfoBatch(
+  parentSessionIds: string[],
+): Map<string, { diag: string; label: string | null; agentId: string }> {
   const db = getDb();
   const map = new Map<string, { diag: string; label: string | null; agentId: string }>();
   if (parentSessionIds.length === 0) return map;
@@ -248,11 +291,15 @@ export function getParentInfoBatch(parentSessionIds: string[]): Map<string, { di
  * Get child sessions for a given parent session_id.
  */
 export function getChildSessions(parentSessionId: string): SessionRow[] {
-  return getDb().prepare("SELECT * FROM sessions WHERE parent_session_id = ? ORDER BY updated_at DESC").all(parentSessionId) as SessionRow[];
+  return getDb()
+    .prepare("SELECT * FROM sessions WHERE parent_session_id = ? ORDER BY updated_at DESC")
+    .all(parentSessionId) as unknown as SessionRow[];
 }
 
 export function updateSessionBlocker(sessionKey: string, blocker: string, blockTs: number): void {
-  getDb().prepare("UPDATE sessions SET blocker = ?, last_block_ts = ? WHERE session_key = ?").run(blocker, blockTs, sessionKey);
+  getDb()
+    .prepare("UPDATE sessions SET blocker = ?, last_block_ts = ? WHERE session_key = ?")
+    .run(blocker, blockTs, sessionKey);
 }
 
 /**
@@ -319,7 +366,7 @@ export function recomputeAllSessionOps(onlyBaseKeys?: Set<string>): void {
   for (const baseKey of baseKeys) {
     const lastStep = lastStepStmt.get(baseKey) as any;
     if (!lastStep) {
-      updateStmt.run(null, null, null, "idle", 0, baseKey, baseKey + ":run:%");
+      updateStmt.run(null, null, null, "idle", 0, baseKey, `${baseKey}:run:%`);
       continue;
     }
 
@@ -331,7 +378,7 @@ export function recomputeAllSessionOps(onlyBaseKeys?: Set<string>): void {
 
     markCurrentStuckStmt.run(baseKey, now, CONFIG.STUCK_THRESHOLD_MS);
     const stuckStep = stuckStepStmt.get(baseKey, now, CONFIG.STUCK_THRESHOLD_MS) as any;
-    const blocker = stuckStep ? (stuckStep.tool_name || stuckStep.node_type) : null;
+    const blocker = stuckStep ? stuckStep.tool_name || stuckStep.node_type : null;
     const blockTs = stuckStep ? stuckStep.ts_epoch_ms : null;
 
     let diagState = "idle";
@@ -341,14 +388,16 @@ export function recomputeAllSessionOps(onlyBaseKeys?: Set<string>): void {
     }
     if (lastStep.status === "error") diagState = "stuck";
 
-    updateStmt.run(currentOp, blocker, blockTs, diagState, lastStep.ts_epoch_ms || 0, baseKey, baseKey + ":run:%");
+    updateStmt.run(currentOp, blocker, blockTs, diagState, lastStep.ts_epoch_ms || 0, baseKey, `${baseKey}:run:%`);
   }
 }
 
 export function updateSessionDiagState(sessionKey: string, diagState: string, currentOp?: string): void {
-  getDb().prepare(`
+  getDb()
+    .prepare(`
     UPDATE sessions SET diag_state = ?, current_op = ? WHERE session_key = ?
-  `).run(diagState, currentOp || null, sessionKey);
+  `)
+    .run(diagState, currentOp || null, sessionKey);
 }
 
 export interface SessionRow {
@@ -390,31 +439,69 @@ export interface SessionListResult {
 }
 
 export function getAllSessions(filters?: {
-  channel?: string; agent?: string; state?: string; q?: string;
-  diag?: string; label?: string;
-  parentKey?: string;  // filter to children by parent session_key (legacy)
-  parentId?: string;   // filter to children by parent session_id (preferred)
-  isCron?: boolean;  // true = only cron, false = exclude cron, undefined = all
-  page?: number; pageSize?: number;
+  channel?: string;
+  agent?: string;
+  state?: string;
+  q?: string;
+  diag?: string;
+  label?: string;
+  parentKey?: string; // filter to children by parent session_key (legacy)
+  parentId?: string; // filter to children by parent session_id (preferred)
+  isCron?: boolean; // true = only cron, false = exclude cron, undefined = all
+  page?: number;
+  pageSize?: number;
 }): SessionListResult {
   const db = getDb();
   let sql = "SELECT * FROM sessions WHERE 1=1";
   let countSql = "SELECT COUNT(*) as total FROM sessions WHERE 1=1";
   const p: any[] = [];
 
-  if (filters?.isCron === true) { sql += " AND channel = 'cron'"; countSql += " AND channel = 'cron'"; }
-  else if (filters?.isCron === false) { sql += " AND channel != 'cron'"; countSql += " AND channel != 'cron'"; }
+  if (filters?.isCron === true) {
+    sql += " AND channel = 'cron'";
+    countSql += " AND channel = 'cron'";
+  } else if (filters?.isCron === false) {
+    sql += " AND channel != 'cron'";
+    countSql += " AND channel != 'cron'";
+  }
 
-  if (filters?.channel) { sql += " AND channel = ?"; countSql += " AND channel = ?"; p.push(filters.channel); }
-  if (filters?.agent) { sql += " AND agent_id = ?"; countSql += " AND agent_id = ?"; p.push(filters.agent); }
-  if (filters?.state) { sql += " AND diag_state = ?"; countSql += " AND diag_state = ?"; p.push(filters.state); }
-  if (filters?.diag) { sql += " AND diag LIKE ?"; countSql += " AND diag LIKE ?"; p.push(`%${filters.diag}%`); }
-  if (filters?.label) { sql += " AND label LIKE ?"; countSql += " AND label LIKE ?"; p.push(`%${filters.label}%`); }
-  if (filters?.parentId) { sql += " AND parent_session_id = ?"; countSql += " AND parent_session_id = ?"; p.push(filters.parentId); }
-  else if (filters?.parentKey) { sql += " AND parent_session_key = ?"; countSql += " AND parent_session_key = ?"; p.push(filters.parentKey); }
+  if (filters?.channel) {
+    sql += " AND channel = ?";
+    countSql += " AND channel = ?";
+    p.push(filters.channel);
+  }
+  if (filters?.agent) {
+    sql += " AND agent_id = ?";
+    countSql += " AND agent_id = ?";
+    p.push(filters.agent);
+  }
+  if (filters?.state) {
+    sql += " AND diag_state = ?";
+    countSql += " AND diag_state = ?";
+    p.push(filters.state);
+  }
+  if (filters?.diag) {
+    sql += " AND diag LIKE ?";
+    countSql += " AND diag LIKE ?";
+    p.push(`%${filters.diag}%`);
+  }
+  if (filters?.label) {
+    sql += " AND label LIKE ?";
+    countSql += " AND label LIKE ?";
+    p.push(`%${filters.label}%`);
+  }
+  if (filters?.parentId) {
+    sql += " AND parent_session_id = ?";
+    countSql += " AND parent_session_id = ?";
+    p.push(filters.parentId);
+  } else if (filters?.parentKey) {
+    sql += " AND parent_session_key = ?";
+    countSql += " AND parent_session_key = ?";
+    p.push(filters.parentKey);
+  }
   if (filters?.q) {
     const clause = " AND (session_key LIKE ? OR label LIKE ? OR session_id LIKE ?)";
-    sql += clause; countSql += clause;
+    sql += clause;
+    countSql += clause;
     p.push(`%${filters.q}%`, `%${filters.q}%`, `%${filters.q}%`);
   }
 
@@ -423,10 +510,10 @@ export function getAllSessions(filters?: {
   const pageSize = filters?.pageSize || 15;
   sql += " ORDER BY updated_at DESC LIMIT ? OFFSET ?";
 
-  const rows = db.prepare(sql).all(...p, pageSize, (page - 1) * pageSize) as SessionRow[];
+  const rows = db.prepare(sql).all(...p, pageSize, (page - 1) * pageSize) as unknown as SessionRow[];
   return { sessions: rows, total, page, pageSize };
 }
 
 export function getSession(key: string): SessionRow | null {
-  return (getDb().prepare("SELECT * FROM sessions WHERE session_key = ?").get(key) as SessionRow) || null;
+  return (getDb().prepare("SELECT * FROM sessions WHERE session_key = ?").get(key) as unknown as SessionRow) || null;
 }

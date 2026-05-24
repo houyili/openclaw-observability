@@ -27,9 +27,9 @@
  *     tests/fixture-ingest.test.ts
  */
 
-import { mkdtempSync, mkdirSync, rmSync, readFileSync, statSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -40,8 +40,10 @@ let passed = 0;
 let failed = 0;
 const failures: string[] = [];
 function assert(cond: boolean, name: string, detail?: string) {
-  if (cond) { passed++; console.log(`  ✅ ${name}`); }
-  else {
+  if (cond) {
+    passed++;
+    console.log(`  ✅ ${name}`);
+  } else {
     failed++;
     console.log(`  ❌ ${name}${detail ? ` — ${detail}` : ""}`);
     failures.push(name);
@@ -92,20 +94,16 @@ assert(runs.length === 2, "two runs parsed", `got ${runs.length}`);
 // = 7 steps
 const run1 = runs[0];
 const run1Names = run1.steps.map((s: any) => `${s.role}:${s.toolName || s.nodeType}`);
-assert(run1.steps.length === 7,
-  `run 1 has 7 steps`,
-  `got ${run1.steps.length}: ${JSON.stringify(run1Names)}`);
+assert(run1.steps.length === 7, `run 1 has 7 steps`, `got ${run1.steps.length}: ${JSON.stringify(run1Names)}`);
 
 // Parallel tool back-linking — read should match the FIRST result, write the second
 const readStep = run1.steps.find((s: any) => s.toolName === "read");
 const writeStep = run1.steps.find((s: any) => s.toolName === "write");
 assert(readStep != null && writeStep != null, "both parallel tool calls present");
 // read at 10:00:03, result at 10:00:05 → 2000ms
-assert(readStep?.durationMs === 2000, "read duration = 2000ms",
-  `got ${readStep?.durationMs}`);
+assert(readStep?.durationMs === 2000, "read duration = 2000ms", `got ${readStep?.durationMs}`);
 // write at 10:00:03, result at 10:00:06.5 → 3500ms
-assert(writeStep?.durationMs === 3500, "write duration = 3500ms",
-  `got ${writeStep?.durationMs}`);
+assert(writeStep?.durationMs === 3500, "write duration = 3500ms", `got ${writeStep?.durationMs}`);
 // Both tool calls' status flipped to ok by their respective results
 assert(readStep?.status === "ok", "read status promoted to ok");
 assert(writeStep?.status === "ok", "write status promoted to ok");
@@ -123,9 +121,7 @@ assert(writeStep?.outputTokens === 40, "write per-tool tokens = 40");
 // = 5 steps
 const run2 = runs[1];
 const run2Names = run2.steps.map((s: any) => `${s.role}:${s.toolName || s.nodeType}`);
-assert(run2.steps.length === 5,
-  `run 2 has 5 steps`,
-  `got ${run2.steps.length}: ${JSON.stringify(run2Names)}`);
+assert(run2.steps.length === 5, `run 2 has 5 steps`, `got ${run2.steps.length}: ${JSON.stringify(run2Names)}`);
 
 // MCP tool detection
 const mcpStep = run2.steps.find((s: any) => s.nodeType === "MCP_CALL");
@@ -136,8 +132,7 @@ assert(mcpStep?.mcpServer === "lark", "mcpServer = 'lark'");
 // assistant message of run 2, so there is no `prevAssistantInputTokens`
 // from within the same run. The cross-run delta is checked in
 // parser-invariants.test.ts §"Context token delta".
-assert(mcpStep?.contextTokenDelta === undefined,
-  "MCP_CALL on first assistant of a run has no contextTokenDelta");
+assert(mcpStep?.contextTokenDelta === undefined, "MCP_CALL on first assistant of a run has no contextTokenDelta");
 
 // Total tokens per run = last assistant's totalTokens
 assert(run1.totalTokens === 340, "run 1 totalTokens = 340", `got ${run1.totalTokens}`);
@@ -157,8 +152,7 @@ assert(stepsAfterFirst === 12, "12 step rows after first upsert", `got ${stepsAf
 upsertSteps(run1);
 upsertSteps(run2);
 const stepsAfterSecond = (db.prepare("SELECT COUNT(*) as n FROM steps").get() as any).n;
-assert(stepsAfterSecond === 12, "still 12 rows after re-upsert (idempotent)",
-  `got ${stepsAfterSecond}`);
+assert(stepsAfterSecond === 12, "still 12 rows after re-upsert (idempotent)", `got ${stepsAfterSecond}`);
 
 // Per-run-id counts
 const run1Rows = (db.prepare("SELECT COUNT(*) as n FROM steps WHERE run_id = ?").get("u-fix-1") as any).n;
@@ -168,17 +162,19 @@ assert(run2Rows === 5, "run 2 has 5 rows in DB", `got ${run2Rows}`);
 
 // Schema-level sanity: indices exist and the ORDER BY ts_epoch_ms DESC seek
 // uses the Round 1 composite index, not a full scan.
-const plan = db.prepare(
-  "EXPLAIN QUERY PLAN SELECT * FROM steps WHERE session_key = ? ORDER BY ts_epoch_ms DESC LIMIT 1",
-).all(sessionKey) as any[];
+const plan = db
+  .prepare("EXPLAIN QUERY PLAN SELECT * FROM steps WHERE session_key = ? ORDER BY ts_epoch_ms DESC LIMIT 1")
+  .all(sessionKey) as any[];
 const planText = plan.map((r) => r.detail || "").join(" | ");
-assert(/USING INDEX idx_steps_session_ts/.test(planText),
-  "latest-step query plan uses idx_steps_session_ts",
-  planText);
+assert(/USING INDEX idx_steps_session_ts/.test(planText), "latest-step query plan uses idx_steps_session_ts", planText);
 
 // Tear down — close the DB and wipe the temp directory.
 closeDb();
-try { rmSync(tmpHome, { recursive: true, force: true }); } catch { /* best effort */ }
+try {
+  rmSync(tmpHome, { recursive: true, force: true });
+} catch {
+  /* best effort */
+}
 
 // ─── Summary ────────────────────────────────────────────────────
 console.log(`\n${"=".repeat(50)}`);

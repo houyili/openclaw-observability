@@ -1,5 +1,5 @@
-import { join } from "node:path";
 import { homedir } from "node:os";
+import { join } from "node:path";
 
 const HOME = process.env.OPENCLAW_HOME || join(homedir(), ".openclaw");
 
@@ -47,11 +47,26 @@ export const CONFIG = {
 
   // Built-in tool names (anything not in this set is treated as MCP tool)
   BUILTIN_TOOLS: new Set([
-    "read", "write", "edit", "exec", "glob", "grep",
-    "process", "cron",
-    "sessions_spawn", "sessions_list", "sessions_yield",
-    "sessions_history", "sessions_send", "session_status",
-    "subagents", "web_search", "web_fetch", "memory_search",
-    "image", "canvas", "pdf",
+    "read",
+    "write",
+    "edit",
+    "exec",
+    "glob",
+    "grep",
+    "process",
+    "cron",
+    "sessions_spawn",
+    "sessions_list",
+    "sessions_yield",
+    "sessions_history",
+    "sessions_send",
+    "session_status",
+    "subagents",
+    "web_search",
+    "web_fetch",
+    "memory_search",
+    "image",
+    "canvas",
+    "pdf",
   ]),
 } as const;

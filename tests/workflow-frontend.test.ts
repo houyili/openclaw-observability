@@ -14,8 +14,10 @@ let passed = 0;
 let failed = 0;
 const failures: string[] = [];
 function assert(cond: boolean, name: string, detail?: string) {
-  if (cond) { passed++; console.log(`  ✅ ${name}`); }
-  else {
+  if (cond) {
+    passed++;
+    console.log(`  ✅ ${name}`);
+  } else {
     failed++;
     console.log(`  ❌ ${name}${detail ? ` — ${detail}` : ""}`);
     failures.push(name);
@@ -28,23 +30,37 @@ function loadAppJs() {
 
   class FakeClassList {
     _s = new Set<string>();
-    add(c: string) { this._s.add(c); }
-    remove(c: string) { this._s.delete(c); }
-    toggle(c: string) { if (this._s.has(c)) this._s.delete(c); else this._s.add(c); }
+    add(c: string) {
+      this._s.add(c);
+    }
+    remove(c: string) {
+      this._s.delete(c);
+    }
+    toggle(c: string) {
+      if (this._s.has(c)) this._s.delete(c);
+      else this._s.add(c);
+    }
   }
   function makeElement(): any {
     const el: any = { innerHTML: "", className: "", dataset: {}, options: [], style: {}, value: "" };
     let txt = "";
     Object.defineProperty(el, "textContent", {
-      get() { return txt; },
-      set(v: unknown) { txt = String(v ?? ""); el.innerHTML = txt.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); },
+      get() {
+        return txt;
+      },
+      set(v: unknown) {
+        txt = String(v ?? "");
+        el.innerHTML = txt.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      },
     });
     el.classList = new FakeClassList();
     el.addEventListener = () => {};
     el.appendChild = (c: any) => c;
     el.removeChild = () => {};
     el.select = () => {};
-    el.add = (opt: any) => { el.options.push(opt); };
+    el.add = (opt: any) => {
+      el.options.push(opt);
+    };
     el.querySelectorAll = () => ({ forEach: (_fn: any) => {}, length: 0 });
     el.querySelector = () => makeElement();
     return el;
@@ -54,12 +70,21 @@ function loadAppJs() {
   const fakeDoc: any = {
     getElementById(id: string) {
       let el = elementsById.get(id);
-      if (!el) { el = makeElement(); elementsById.set(id, el); }
+      if (!el) {
+        el = makeElement();
+        elementsById.set(id, el);
+      }
       return el;
     },
-    querySelectorAll() { return { forEach: (_fn: any) => {}, length: 0 }; },
-    querySelector() { return makeElement(); },
-    createElement() { return makeElement(); },
+    querySelectorAll() {
+      return { forEach: (_fn: any) => {}, length: 0 };
+    },
+    querySelector() {
+      return makeElement();
+    },
+    createElement() {
+      return makeElement();
+    },
     body: { appendChild: () => {}, removeChild: () => {} },
     execCommand: () => {},
   };
@@ -82,7 +107,20 @@ function loadAppJs() {
     clearTimeout: () => {},
     URLSearchParams: globalThis.URLSearchParams,
     URL: globalThis.URL,
-    Promise, console, Date, Math, Object, Array, String, Number, Boolean, JSON, Map, Set, Symbol, Error,
+    Promise,
+    console,
+    Date,
+    Math,
+    Object,
+    Array,
+    String,
+    Number,
+    Boolean,
+    JSON,
+    Map,
+    Set,
+    Symbol,
+    Error,
     encodeURIComponent: globalThis.encodeURIComponent,
     decodeURIComponent: globalThis.decodeURIComponent,
   };
@@ -93,8 +131,12 @@ function loadAppJs() {
 
   return {
     ctx,
-    setFetchResponse(pattern: string, payload: unknown) { fetchResponses.set(pattern, payload); },
-    detailHtml() { return fakeDoc.getElementById("session-detail").innerHTML as string; },
+    setFetchResponse(pattern: string, payload: unknown) {
+      fetchResponses.set(pattern, payload);
+    },
+    detailHtml() {
+      return fakeDoc.getElementById("session-detail").innerHTML as string;
+    },
   };
 }
 
@@ -110,18 +152,82 @@ function sampleWorkflow() {
       { id: "workflow_state", title: "Workflow State", kind: "workflow_state" },
     ],
     events: [
-      { id: "e1", laneId: "user", type: "user_message", ts: "2026-05-23T07:31:00Z", tsEpochMs: 1, title: "user message", provenance: { run_id: "run-12345678" } },
-      { id: "e1b", laneId: "parent", type: "skill_or_source_step", ts: "2026-05-23T07:31:00.500Z", tsEpochMs: 1.5, title: "research_query", provenance: { step_id: "step-source", duration_ms: 200 } },
-      { id: "e2", laneId: "parent", type: "sessions_spawn_requested", ts: "2026-05-23T07:31:01Z", tsEpochMs: 2, title: "sessions_spawn", provenance: { step_id: "step-spawn", duration_ms: 1200, input_tokens: 10000, cache_read_tokens: 2000, output_tokens: 80 } },
-      { id: "e3", laneId: "runtime", type: "sessions_spawn_accepted", ts: "2026-05-23T07:31:01Z", tsEpochMs: 3, title: "spawn accepted", subtitle: "source-refresh", provenance: { childSessionKey: "abc", child_run_id: "child-run" } },
-      { id: "e4", laneId: "child:abc", type: "child_final", ts: "2026-05-23T07:35:00Z", tsEpochMs: 4, title: "child final", provenance: { step_id: "child-final", artifact_path: "/tmp/source.md" } },
-      { id: "e5", laneId: "workflow_state", type: "workflow_state_gap", ts: "2026-05-23T07:35:01Z", tsEpochMs: 5, title: "child binding gap", status: "warning", provenance: { flow_id: "flow-1" } },
+      {
+        id: "e1",
+        laneId: "user",
+        type: "user_message",
+        ts: "2026-05-23T07:31:00Z",
+        tsEpochMs: 1,
+        title: "user message",
+        provenance: { run_id: "run-12345678" },
+      },
+      {
+        id: "e1b",
+        laneId: "parent",
+        type: "skill_or_source_step",
+        ts: "2026-05-23T07:31:00.500Z",
+        tsEpochMs: 1.5,
+        title: "research_query",
+        provenance: { step_id: "step-source", duration_ms: 200 },
+      },
+      {
+        id: "e2",
+        laneId: "parent",
+        type: "sessions_spawn_requested",
+        ts: "2026-05-23T07:31:01Z",
+        tsEpochMs: 2,
+        title: "sessions_spawn",
+        provenance: {
+          step_id: "step-spawn",
+          duration_ms: 1200,
+          input_tokens: 10000,
+          cache_read_tokens: 2000,
+          output_tokens: 80,
+        },
+      },
+      {
+        id: "e3",
+        laneId: "runtime",
+        type: "sessions_spawn_accepted",
+        ts: "2026-05-23T07:31:01Z",
+        tsEpochMs: 3,
+        title: "spawn accepted",
+        subtitle: "source-refresh",
+        provenance: { childSessionKey: "abc", child_run_id: "child-run" },
+      },
+      {
+        id: "e4",
+        laneId: "child:abc",
+        type: "child_final",
+        ts: "2026-05-23T07:35:00Z",
+        tsEpochMs: 4,
+        title: "child final",
+        provenance: { step_id: "child-final", artifact_path: "/tmp/source.md" },
+      },
+      {
+        id: "e5",
+        laneId: "workflow_state",
+        type: "workflow_state_gap",
+        ts: "2026-05-23T07:35:01Z",
+        tsEpochMs: 5,
+        title: "child binding gap",
+        status: "warning",
+        provenance: { flow_id: "flow-1" },
+      },
     ],
     edges: [
       { id: "edge-1", from: "e2", to: "e3", type: "spawn", label: "accepted" },
       { id: "edge-2", from: "e3", to: "e5", type: "workflow_state", label: "gap" },
     ],
-    diagnostics: [{ id: "d1", severity: "warning", type: "workflow_state_child_refs_empty", message: "Accepted child is missing from managed workflow child references", eventId: "e5" }],
+    diagnostics: [
+      {
+        id: "d1",
+        severity: "warning",
+        type: "workflow_state_child_refs_empty",
+        message: "Accepted child is missing from managed workflow child references",
+        eventId: "e5",
+      },
+    ],
     attention: {
       status: "stuck",
       title: "Parent yielded; waiting for child merge",
@@ -140,7 +246,16 @@ function sampleWorkflow() {
         { id: "edges.resolve", status: "ok", message: "all edges resolve" },
       ],
     },
-    runs: [{ runId: "run-12345678", startedAt: "2026-05-23T07:31:00Z", durationMs: 1000, modelSteps: 1, toolSteps: 2, status: "completed" }],
+    runs: [
+      {
+        runId: "run-12345678",
+        startedAt: "2026-05-23T07:31:00Z",
+        durationMs: 1000,
+        modelSteps: 1,
+        toolSteps: 2,
+        status: "completed",
+      },
+    ],
   };
 }
 
@@ -151,7 +266,15 @@ function samplePromptCheck() {
     runId: "run-12345678",
     status: "warning",
     promptSources: [
-      { id: "rules", kind: "rule", path: "config/prompt-rules.json", exists: true, hash: "abc", mtime: 1, title: "prompt-rules.json" },
+      {
+        id: "rules",
+        kind: "rule",
+        path: "config/prompt-rules.json",
+        exists: true,
+        hash: "abc",
+        mtime: 1,
+        title: "prompt-rules.json",
+      },
     ],
     rules: [
       {
@@ -192,10 +315,23 @@ function samplePromptCheck() {
         severity: "warning",
         type: "rule_checkpoint_before_sessions_yield",
         message: "sessions_yield happened without a visible checkpoint.",
-        provenance: { rule_id: "checkpoint_before_sessions_yield", step_id: "step-yield", source_file: "docs/workflow-graph.md" },
+        provenance: {
+          rule_id: "checkpoint_before_sessions_yield",
+          step_id: "step-yield",
+          source_file: "docs/workflow-graph.md",
+        },
       },
     ],
-    runs: [{ runId: "run-12345678", startedAt: "2026-05-23T07:31:00Z", durationMs: 1000, modelSteps: 1, toolSteps: 2, status: "completed" }],
+    runs: [
+      {
+        runId: "run-12345678",
+        startedAt: "2026-05-23T07:31:00Z",
+        durationMs: 1000,
+        modelSteps: 1,
+        toolSteps: 2,
+        status: "completed",
+      },
+    ],
   };
 }
 
@@ -207,13 +343,40 @@ function sampleContext() {
   return {
     runId: "run-12345678",
     runs: [],
-    breakdown: { runId: "run-12345678", totalLatest: 1, buckets: { frameworkBaseline: 1, assistantOutputsCumulative: 0, toolResultsCumulative: 0, mcpDeltasCumulative: 0, unaccountedCumulative: 0 } },
+    breakdown: {
+      runId: "run-12345678",
+      totalLatest: 1,
+      buckets: {
+        frameworkBaseline: 1,
+        assistantOutputsCumulative: 0,
+        toolResultsCumulative: 0,
+        mcpDeltasCumulative: 0,
+        unaccountedCumulative: 0,
+      },
+    },
     timeline: {
       turns: [],
       phases: [],
       topSpikes: [],
-      cumulative: { totalTurns: 0, totalOutputTokens: 0, totalThinkingChars: 0, totalToolResultChars: 0, totalToolCallArgsChars: 0, totalReplyTextChars: 0, peakInputTokens: 1, finalInputTokens: 1, totalInputCumulative: 1, totalCacheReadCumulative: 0, cacheHitRate: null },
-      loopFlags: { suspectedLoopWindows: [], repeatedFileReads: [], consecutiveNoWriteTurns: 0, healthVerdict: "healthy" },
+      cumulative: {
+        totalTurns: 0,
+        totalOutputTokens: 0,
+        totalThinkingChars: 0,
+        totalToolResultChars: 0,
+        totalToolCallArgsChars: 0,
+        totalReplyTextChars: 0,
+        peakInputTokens: 1,
+        finalInputTokens: 1,
+        totalInputCumulative: 1,
+        totalCacheReadCumulative: 0,
+        cacheHitRate: null,
+      },
+      loopFlags: {
+        suspectedLoopWindows: [],
+        repeatedFileReads: [],
+        consecutiveNoWriteTurns: 0,
+        healthVerdict: "healthy",
+      },
       insightBanner: null,
     },
   };
@@ -260,7 +423,10 @@ console.log("\n=== Group 2: refreshDetail order and preservation ===");
   assert(workflowIdx >= 0, "Workflow Graph section rendered");
   assert(traceIdx >= 0, "Workflow trace section preserved");
   assert(contextIdx >= 0, "Context length section preserved");
-  assert(promptIdx < workflowIdx && workflowIdx < traceIdx && traceIdx < contextIdx, "section order is prompt, graph, trace, context");
+  assert(
+    promptIdx < workflowIdx && workflowIdx < traceIdx && traceIdx < contextIdx,
+    "section order is prompt, graph, trace, context",
+  );
   assert(html.includes("detail-section-prompt"), "prompt section wrapper present");
   assert(html.includes("detail-section-workflow"), "workflow section wrapper present");
   assert(html.includes("detail-section-trace"), "trace wrapper preserved");

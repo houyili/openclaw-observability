@@ -1,5 +1,5 @@
 import type { ServerResponse } from "node:http";
-import { getMcpStats, getMcpErrorTypeRanking, buildRankings } from "../storage/steps-repo.ts";
+import { buildRankings, getMcpErrorTypeRanking, getMcpStats } from "../storage/steps-repo.ts";
 
 type SendJson = (res: ServerResponse, data: unknown, status?: number) => void;
 

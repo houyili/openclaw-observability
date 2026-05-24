@@ -1,9 +1,9 @@
-import { statSync, readdirSync, existsSync, readFileSync } from "node:fs";
-import { join, basename } from "node:path";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { basename, join } from "node:path";
 import { CONFIG } from "../config.ts";
-import { parseTranscript, type TranscriptEntry, type ParsedRun } from "./transcript-parser.ts";
 import { getDb } from "../storage/db.ts";
 import { isCanonicalTranscriptFile } from "./transcript-files.ts";
+import { type ParsedRun, parseTranscript, type TranscriptEntry } from "./transcript-parser.ts";
 
 export interface WatcherCallbacks {
   onRuns: (sessionKey: string, runs: ParsedRun[]) => void;
@@ -24,9 +24,12 @@ export interface WatcherCallbacks {
 // we only pay this cost on files that actually changed.
 
 function readAllEntries(filePath: string): { entries: TranscriptEntry[]; size: number } {
-  let stat;
-  try { stat = statSync(filePath); }
-  catch { return { entries: [], size: 0 }; }
+  let stat: ReturnType<typeof statSync>;
+  try {
+    stat = statSync(filePath);
+  } catch {
+    return { entries: [], size: 0 };
+  }
 
   if (stat.size === 0) return { entries: [], size: 0 };
 
@@ -34,7 +37,9 @@ function readAllEntries(filePath: string): { entries: TranscriptEntry[]; size: n
   // runaway transcript cannot blow up the event loop. In practice transcripts
   // are well under 2 MB; anything bigger is skipped and reported.
   if (stat.size > 50 * 1024 * 1024) {
-    console.error(`[transcript-watcher] skipping oversized file (${Math.round(stat.size / 1024 / 1024)} MB): ${basename(filePath)}`);
+    console.error(
+      `[transcript-watcher] skipping oversized file (${Math.round(stat.size / 1024 / 1024)} MB): ${basename(filePath)}`,
+    );
     return { entries: [], size: stat.size };
   }
 
@@ -42,7 +47,11 @@ function readAllEntries(filePath: string): { entries: TranscriptEntry[]; size: n
   const entries: TranscriptEntry[] = [];
   for (const line of raw.split("\n")) {
     if (!line) continue;
-    try { entries.push(JSON.parse(line)); } catch { /* skip malformed */ }
+    try {
+      entries.push(JSON.parse(line));
+    } catch {
+      /* skip malformed */
+    }
   }
   return { entries, size: stat.size };
 }
@@ -97,7 +106,9 @@ function buildSessionIdMap(): Map<string, string> {
           map.set(sid, key);
         }
       }
-    } catch { /* skip unreadable */ }
+    } catch {
+      /* skip unreadable */
+    }
   }
   return map;
 }
@@ -202,7 +213,9 @@ export function startTranscriptWatcher(callbacks: WatcherCallbacks): { stop: () 
         // Found a proper key, or first time — use it.
         // If key changed, we need to re-home existing steps.
         if (sessionKey && sessionKey !== resolved) {
-          db.prepare("UPDATE steps SET session_key = ?, session_id = COALESCE(session_id, ?) WHERE session_key = ?").run(resolved, sessionId, sessionKey);
+          db.prepare(
+            "UPDATE steps SET session_key = ?, session_id = COALESCE(session_id, ?) WHERE session_key = ?",
+          ).run(resolved, sessionId, sessionKey);
         }
         sessionKey = resolved;
       }

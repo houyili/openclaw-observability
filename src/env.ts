@@ -2,10 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 
 export function parseEnvValue(raw: string): string {
   let value = raw.trim();
-  if (
-    (value.startsWith('"') && value.endsWith('"')) ||
-    (value.startsWith("'") && value.endsWith("'"))
-  ) {
+  if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
     value = value.slice(1, -1);
   }
   return value;

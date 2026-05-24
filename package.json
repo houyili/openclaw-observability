@@ -35,6 +35,10 @@
   "scripts": {
     "start": "node --experimental-sqlite --experimental-strip-types --no-warnings src/index.ts",
     "dev": "node --experimental-sqlite --experimental-strip-types --watch --no-warnings src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check .",
+    "format": "biome format --write .",
+    "format:check": "biome format .",
     "test": "./tests/run-all.sh",
     "test:hermetic": "TEST_FILTER='unit invariants fixture transcript-consistency-e2e prompt-check open-source-sanitization auth-stale context-length cli-commands frontend-detail workflow-projection workflow-frontend session-id-scope env-config service-self-check installer-scripts watcher-rehome token-backfill parent-child mcp-registry-coverage redact demo-seed' ./tests/run-all.sh",
     "test:unit": "node --experimental-sqlite --experimental-strip-types --no-warnings tests/run-tests.ts",
@@ -67,5 +71,10 @@
   },
   "engines": {
     "node": ">=22.0.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.4.15",
+    "@types/node": "^25.9.1",
+    "typescript": "^6.0.3"
   }
 }

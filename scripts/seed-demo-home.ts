@@ -21,10 +21,10 @@
  * (Or just `scripts/demo.sh` which wraps both steps.)
  */
 
-import { existsSync, mkdirSync, readdirSync, statSync, copyFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
+import { fileURLToPath } from "node:url";
 
 const __filename = fileURLToPath(import.meta.url);
 const REPO_ROOT = dirname(dirname(__filename));
@@ -34,7 +34,7 @@ function argValue(flag: string, fallback: string): string {
   const args = process.argv.slice(2);
   for (const a of args) {
     if (a === flag) return "true";
-    if (a.startsWith(flag + "=")) return a.slice(flag.length + 1);
+    if (a.startsWith(`${flag}=`)) return a.slice(flag.length + 1);
   }
   return fallback;
 }
@@ -94,7 +94,7 @@ function writeSessionsJson(agent: string, entries: Record<string, any>): void {
   const path = join(TARGET, "agents", agent, "sessions", "sessions.json");
   writeFileSync(path, JSON.stringify(entries, null, 2));
 }
-const nowIso = new Date().toISOString();
+const _nowIso = new Date().toISOString();
 writeSessionsJson("demo-research", {
   "agent:demo-research:chat:direct:demo-user-alpha": {
     sessionId: "demo-research-active",
@@ -143,18 +143,63 @@ const seed = db.prepare(`INSERT OR REPLACE INTO sessions
    runtime_mode, updated_at, source, token_source)
   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
 const tNow = Date.now();
-seed.run("agent:demo-research:chat:direct:demo-user-alpha", "demo-research-active",
-  "demo-research", "chat-direct", "user:demo-user-alpha", "demo: arxiv synthesis run",
-  "direct", "demo-fast-model", "demo-provider", 5000, 110, 5085, 5000, "default",
-  tNow, "transcript+auth", "transcript-backfill");
-seed.run("agent:demo-research:chat:direct:demo-user-stuck", "demo-research-stuck",
-  "demo-research", "chat-direct", "user:demo-user-stuck", "demo: web_fetch hanging",
-  "direct", "demo-fast-model", "demo-provider", 900, 80, 980, 900, "default",
-  tNow, "transcript+auth", "transcript-backfill");
-seed.run("agent:demo-publishing:chat:direct:demo-user-alpha", "demo-publishing-success",
-  "demo-publishing", "chat-direct", "user:demo-user-alpha", "demo: publish + sync",
-  "direct", "demo-fast-model", "demo-provider", 1900, 35, 1935, 1900, "default",
-  tNow, "transcript+auth", "transcript-backfill");
+seed.run(
+  "agent:demo-research:chat:direct:demo-user-alpha",
+  "demo-research-active",
+  "demo-research",
+  "chat-direct",
+  "user:demo-user-alpha",
+  "demo: arxiv synthesis run",
+  "direct",
+  "demo-fast-model",
+  "demo-provider",
+  5000,
+  110,
+  5085,
+  5000,
+  "default",
+  tNow,
+  "transcript+auth",
+  "transcript-backfill",
+);
+seed.run(
+  "agent:demo-research:chat:direct:demo-user-stuck",
+  "demo-research-stuck",
+  "demo-research",
+  "chat-direct",
+  "user:demo-user-stuck",
+  "demo: web_fetch hanging",
+  "direct",
+  "demo-fast-model",
+  "demo-provider",
+  900,
+  80,
+  980,
+  900,
+  "default",
+  tNow,
+  "transcript+auth",
+  "transcript-backfill",
+);
+seed.run(
+  "agent:demo-publishing:chat:direct:demo-user-alpha",
+  "demo-publishing-success",
+  "demo-publishing",
+  "chat-direct",
+  "user:demo-user-alpha",
+  "demo: publish + sync",
+  "direct",
+  "demo-fast-model",
+  "demo-provider",
+  1900,
+  35,
+  1935,
+  1900,
+  "default",
+  tNow,
+  "transcript+auth",
+  "transcript-backfill",
+);
 db.close();
 
 console.log(`[demo] seeded ${copied} file(s) into ${TARGET}`);

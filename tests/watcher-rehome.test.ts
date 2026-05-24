@@ -15,9 +15,9 @@
  *     tests/watcher-rehome.test.ts
  */
 
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -27,8 +27,10 @@ let passed = 0;
 let failed = 0;
 const failures: string[] = [];
 function assert(cond: boolean, name: string, detail?: string) {
-  if (cond) { passed++; console.log(`  ✅ ${name}`); }
-  else {
+  if (cond) {
+    passed++;
+    console.log(`  ✅ ${name}`);
+  } else {
     failed++;
     console.log(`  ❌ ${name}${detail ? ` — ${detail}` : ""}`);
     failures.push(name);
@@ -59,26 +61,41 @@ const PROPER_SESSION_KEY = "agent:demo:subagent:36e648ee-1005-4fed-a43c-f5743397
 // (ON CONFLICT(step_id) DO UPDATE doesn't update session_key).
 let transcriptSeq = 0;
 function buildSyntheticTranscript(): string {
-  const p = `g${++transcriptSeq}`;  // unique prefix per call
+  const p = `g${++transcriptSeq}`; // unique prefix per call
   const entries = [
     {
-      type: "message", id: `u-${p}-1`, parentId: "", timestamp: "2026-04-12T12:00:00.000Z",
+      type: "message",
+      id: `u-${p}-1`,
+      parentId: "",
+      timestamp: "2026-04-12T12:00:00.000Z",
       message: { role: "user", content: [{ type: "text", text: "test query" }] },
     },
     {
-      type: "message", id: `a-${p}-1`, parentId: `u-${p}-1`, timestamp: "2026-04-12T12:00:02.000Z",
+      type: "message",
+      id: `a-${p}-1`,
+      parentId: `u-${p}-1`,
+      timestamp: "2026-04-12T12:00:02.000Z",
       message: {
         role: "assistant",
-        content: [{ type: "thinking" }, { type: "toolCall", name: "read", id: `tc-${p}-1`, arguments: { file_path: "/tmp/x.txt" } }],
+        content: [
+          { type: "thinking" },
+          { type: "toolCall", name: "read", id: `tc-${p}-1`, arguments: { file_path: "/tmp/x.txt" } },
+        ],
         usage: { input: 500, output: 40, totalTokens: 540 },
       },
     },
     {
-      type: "message", id: `r-${p}-1`, parentId: `a-${p}-1`, timestamp: "2026-04-12T12:00:04.000Z",
+      type: "message",
+      id: `r-${p}-1`,
+      parentId: `a-${p}-1`,
+      timestamp: "2026-04-12T12:00:04.000Z",
       message: { role: "toolResult", content: [{ type: "text", text: "file contents here" }] },
     },
     {
-      type: "message", id: `a-${p}-2`, parentId: `r-${p}-1`, timestamp: "2026-04-12T12:00:06.000Z",
+      type: "message",
+      id: `a-${p}-2`,
+      parentId: `r-${p}-1`,
+      timestamp: "2026-04-12T12:00:06.000Z",
       message: {
         role: "assistant",
         content: [{ type: "thinking" }, { type: "text", text: "done" }],
@@ -86,45 +103,46 @@ function buildSyntheticTranscript(): string {
       },
     },
   ];
-  return entries.map(e => JSON.stringify(e)).join("\n") + "\n";
+  return `${entries.map((e) => JSON.stringify(e)).join("\n")}\n`;
 }
-
 
 // ═══════════════════════════════════════════════════════════════
 console.log("\n=== Group 1: Raw UUID detection regex ===");
 // ═══════════════════════════════════════════════════════════════
 
 {
-  assert(isCanonicalTranscriptFile("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.jsonl") === true,
-    "canonical transcript file accepted");
-  assert(isCanonicalTranscriptFile("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.acp-stream.jsonl") === false,
-    "ACP stream sidecar skipped");
-  assert(isCanonicalTranscriptFile("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.checkpoint.1.jsonl") === false,
-    "checkpoint sidecar skipped");
-  assert(isCanonicalTranscriptFile("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.trajectory.jsonl") === false,
-    "trajectory sidecar skipped");
+  assert(
+    isCanonicalTranscriptFile("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.jsonl") === true,
+    "canonical transcript file accepted",
+  );
+  assert(
+    isCanonicalTranscriptFile("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.acp-stream.jsonl") === false,
+    "ACP stream sidecar skipped",
+  );
+  assert(
+    isCanonicalTranscriptFile("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.checkpoint.1.jsonl") === false,
+    "checkpoint sidecar skipped",
+  );
+  assert(
+    isCanonicalTranscriptFile("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.trajectory.jsonl") === false,
+    "trajectory sidecar skipped",
+  );
 
   // The regex: /^[0-9a-f]{8}-[0-9a-f]{4}-/ without ":"
-  const isRawUuid = (key: string) =>
-    /^[0-9a-f]{8}-[0-9a-f]{4}-/.test(key) && !key.includes(":");
+  const isRawUuid = (key: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-/.test(key) && !key.includes(":");
 
-  assert(isRawUuid("b1f2c2fc-3e87-4b23-8347-04c121d2f83b") === true,
-    "raw UUID is detected");
-  assert(isRawUuid("36e648ee-1005-4fed-a43c-f57433975001") === true,
-    "another raw UUID is detected");
-  assert(isRawUuid("agent:main:cron:188f5830-305b-42ee-be30-cefd5a848e28") === false,
-    "proper session_key with colons is NOT raw UUID");
-  assert(isRawUuid("agent:demo:subagent:36e648ee-1005-4fed") === false,
-    "subagent key with colons is NOT raw UUID");
-  assert(isRawUuid("") === false,
-    "empty string is NOT raw UUID");
-  assert(isRawUuid("not-a-uuid-at-all") === false,
-    "non-UUID string is NOT raw UUID");
+  assert(isRawUuid("b1f2c2fc-3e87-4b23-8347-04c121d2f83b") === true, "raw UUID is detected");
+  assert(isRawUuid("36e648ee-1005-4fed-a43c-f57433975001") === true, "another raw UUID is detected");
+  assert(
+    isRawUuid("agent:main:cron:188f5830-305b-42ee-be30-cefd5a848e28") === false,
+    "proper session_key with colons is NOT raw UUID",
+  );
+  assert(isRawUuid("agent:demo:subagent:36e648ee-1005-4fed") === false, "subagent key with colons is NOT raw UUID");
+  assert(isRawUuid("") === false, "empty string is NOT raw UUID");
+  assert(isRawUuid("not-a-uuid-at-all") === false, "non-UUID string is NOT raw UUID");
   // Edge case: uppercase hex should NOT match (UUIDs from sessions.json are lowercase)
-  assert(isRawUuid("B1F2C2FC-3e87-4b23-8347-04c121d2f83b") === false,
-    "uppercase hex prefix does NOT match");
+  assert(isRawUuid("B1F2C2FC-3e87-4b23-8347-04c121d2f83b") === false, "uppercase hex prefix does NOT match");
 }
-
 
 // ═══════════════════════════════════════════════════════════════
 console.log("\n=== Group 2: resolveSessionKey priority ===");
@@ -157,33 +175,33 @@ console.log("\n=== Group 2: resolveSessionKey priority ===");
       for (const run of runs) upsertSteps(run);
     },
   });
-  const stepsUnderProperKey = (db.prepare(
-    "SELECT COUNT(*) as n FROM steps WHERE session_key = ?"
-  ).get(PROPER_SESSION_KEY) as any).n;
+  const stepsUnderProperKey = (
+    db.prepare("SELECT COUNT(*) as n FROM steps WHERE session_key = ?").get(PROPER_SESSION_KEY) as any
+  ).n;
 
-  assert(stepsUnderProperKey > 0,
+  assert(
+    stepsUnderProperKey > 0,
     `steps stored under proper session_key (got ${stepsUnderProperKey})`,
-    `expected >0, got ${stepsUnderProperKey}`);
+    `expected >0, got ${stepsUnderProperKey}`,
+  );
 
-  const stepsUnderRawUuid = (db.prepare(
-    "SELECT COUNT(*) as n FROM steps WHERE session_key = ?"
-  ).get(SUBAGENT_SESSION_ID) as any).n;
+  const stepsUnderRawUuid = (
+    db.prepare("SELECT COUNT(*) as n FROM steps WHERE session_key = ?").get(SUBAGENT_SESSION_ID) as any
+  ).n;
 
-  assert(stepsUnderRawUuid === 0,
-    "no steps stored under raw UUID key");
+  assert(stepsUnderRawUuid === 0, "no steps stored under raw UUID key");
 
   // Check ingest_state also has the proper key
-  const ingestRow = db.prepare(
-    "SELECT session_key FROM ingest_state WHERE file_path = ?"
-  ).get(transcriptPath) as any;
+  const ingestRow = db.prepare("SELECT session_key FROM ingest_state WHERE file_path = ?").get(transcriptPath) as any;
 
-  assert(ingestRow?.session_key === PROPER_SESSION_KEY,
+  assert(
+    ingestRow?.session_key === PROPER_SESSION_KEY,
     "ingest_state has proper session_key",
-    `got ${ingestRow?.session_key}`);
+    `got ${ingestRow?.session_key}`,
+  );
 
   stop();
 }
-
 
 // ═══════════════════════════════════════════════════════════════
 console.log("\n=== Group 3: Raw UUID re-homing on map refresh ===");
@@ -217,20 +235,19 @@ console.log("\n=== Group 3: Raw UUID re-homing on map refresh ===");
   });
 
   // After first tick: steps should be under the raw UUID (fallback)
-  const stepsRawBefore = (db.prepare(
-    "SELECT COUNT(*) as n FROM steps WHERE session_key = ?"
-  ).get(LATE_SUBAGENT_ID) as any).n;
+  const stepsRawBefore = (
+    db.prepare("SELECT COUNT(*) as n FROM steps WHERE session_key = ?").get(LATE_SUBAGENT_ID) as any
+  ).n;
 
-  assert(stepsRawBefore > 0,
-    `steps initially under raw UUID fallback (got ${stepsRawBefore})`);
+  assert(stepsRawBefore > 0, `steps initially under raw UUID fallback (got ${stepsRawBefore})`);
 
   // The ingest_state should have the raw UUID as session_key
-  const ingestBefore = db.prepare(
-    "SELECT session_key FROM ingest_state WHERE file_path = ?"
-  ).get(latePath) as any;
-  assert(ingestBefore?.session_key === LATE_SUBAGENT_ID,
+  const ingestBefore = db.prepare("SELECT session_key FROM ingest_state WHERE file_path = ?").get(latePath) as any;
+  assert(
+    ingestBefore?.session_key === LATE_SUBAGENT_ID,
     "ingest_state initially has raw UUID",
-    `got ${ingestBefore?.session_key}`);
+    `got ${ingestBefore?.session_key}`,
+  );
 
   stop1();
 
@@ -240,7 +257,7 @@ console.log("\n=== Group 3: Raw UUID re-homing on map refresh ===");
   writeFileSync(mainSessionsPath, JSON.stringify(updatedSessions));
 
   // Append a byte to the transcript so the size cache detects a change
-  writeFileSync(latePath, readFileSync(latePath, "utf-8") + "\n");
+  writeFileSync(latePath, `${readFileSync(latePath, "utf-8")}\n`);
 
   // Force map rebuild to pick up the updated sessions.json
   _resetSessionIdMapForTest();
@@ -253,32 +270,29 @@ console.log("\n=== Group 3: Raw UUID re-homing on map refresh ===");
   });
 
   // After re-resolution: steps should be migrated to proper key
-  const stepsProperAfter = (db.prepare(
-    "SELECT COUNT(*) as n FROM steps WHERE session_key = ?"
-  ).get(LATE_PROPER_KEY) as any).n;
+  const stepsProperAfter = (
+    db.prepare("SELECT COUNT(*) as n FROM steps WHERE session_key = ?").get(LATE_PROPER_KEY) as any
+  ).n;
 
-  assert(stepsProperAfter > 0,
-    `steps re-homed to proper key after map refresh (got ${stepsProperAfter})`);
+  assert(stepsProperAfter > 0, `steps re-homed to proper key after map refresh (got ${stepsProperAfter})`);
 
-  const stepsRawAfter = (db.prepare(
-    "SELECT COUNT(*) as n FROM steps WHERE session_key = ?"
-  ).get(LATE_SUBAGENT_ID) as any).n;
+  const stepsRawAfter = (
+    db.prepare("SELECT COUNT(*) as n FROM steps WHERE session_key = ?").get(LATE_SUBAGENT_ID) as any
+  ).n;
 
-  assert(stepsRawAfter === 0,
-    "no steps remain under raw UUID after re-homing");
+  assert(stepsRawAfter === 0, "no steps remain under raw UUID after re-homing");
 
   // Ingest state should be updated too
-  const ingestAfter = db.prepare(
-    "SELECT session_key FROM ingest_state WHERE file_path = ?"
-  ).get(latePath) as any;
+  const ingestAfter = db.prepare("SELECT session_key FROM ingest_state WHERE file_path = ?").get(latePath) as any;
 
-  assert(ingestAfter?.session_key === LATE_PROPER_KEY,
+  assert(
+    ingestAfter?.session_key === LATE_PROPER_KEY,
     "ingest_state updated to proper key",
-    `got ${ingestAfter?.session_key}`);
+    `got ${ingestAfter?.session_key}`,
+  );
 
   stop2();
 }
-
 
 // ═══════════════════════════════════════════════════════════════
 console.log("\n=== Group 4: Proper key is NOT re-resolved ===");
@@ -295,7 +309,7 @@ console.log("\n=== Group 4: Proper key is NOT re-resolved ===");
 
   const transcriptPath = join(tmpHome, "agents/demo/sessions", `${SUBAGENT_SESSION_ID}.jsonl`);
   // Append a line to trigger reparse
-  writeFileSync(transcriptPath, readFileSync(transcriptPath, "utf-8") + "\n");
+  writeFileSync(transcriptPath, `${readFileSync(transcriptPath, "utf-8")}\n`);
 
   const { stop } = watcher.startTranscriptWatcher({
     onRuns: (_key: string, runs: any[]) => {
@@ -303,25 +317,22 @@ console.log("\n=== Group 4: Proper key is NOT re-resolved ===");
     },
   });
 
-  const ingestRow = db.prepare(
-    "SELECT session_key FROM ingest_state WHERE file_path = ?"
-  ).get(transcriptPath) as any;
+  const ingestRow = db.prepare("SELECT session_key FROM ingest_state WHERE file_path = ?").get(transcriptPath) as any;
 
-  assert(ingestRow?.session_key === PROPER_SESSION_KEY,
+  assert(
+    ingestRow?.session_key === PROPER_SESSION_KEY,
     "proper session_key remains stable across ticks",
-    `got ${ingestRow?.session_key}`);
+    `got ${ingestRow?.session_key}`,
+  );
 
   // Steps should still be under the proper key, not duplicated
-  const stepCount = (db.prepare(
-    "SELECT COUNT(*) as n FROM steps WHERE session_key = ?"
-  ).get(PROPER_SESSION_KEY) as any).n;
+  const stepCount = (db.prepare("SELECT COUNT(*) as n FROM steps WHERE session_key = ?").get(PROPER_SESSION_KEY) as any)
+    .n;
 
-  assert(stepCount > 0,
-    `steps still under proper key (got ${stepCount})`);
+  assert(stepCount > 0, `steps still under proper key (got ${stepCount})`);
 
   stop();
 }
-
 
 // ═══════════════════════════════════════════════════════════════
 console.log("\n=== Group 5: extractSessionIdFromFile strips prefixes ===");
@@ -363,18 +374,21 @@ console.log("\n=== Group 5: extractSessionIdFromFile strips prefixes ===");
 
   // Verify both files resolved to their proper keys
   const ingest1 = db.prepare("SELECT session_key FROM ingest_state WHERE file_path = ?").get(path1) as any;
-  assert(ingest1?.session_key === `agent:main:session:${uuid1}`,
+  assert(
+    ingest1?.session_key === `agent:main:session:${uuid1}`,
     "plain UUID filename resolves correctly",
-    `got ${ingest1?.session_key}`);
+    `got ${ingest1?.session_key}`,
+  );
 
   const ingest2 = db.prepare("SELECT session_key FROM ingest_state WHERE file_path = ?").get(path2) as any;
-  assert(ingest2?.session_key === `agent:main:session:${uuid2}`,
+  assert(
+    ingest2?.session_key === `agent:main:session:${uuid2}`,
     "timestamp-prefixed UUID filename resolves correctly",
-    `got ${ingest2?.session_key}`);
+    `got ${ingest2?.session_key}`,
+  );
 
   stop();
 }
-
 
 // ═══════════════════════════════════════════════════════════════
 console.log("\n=== Group 6: DB fallback when map has no entry ===");
@@ -407,20 +421,19 @@ console.log("\n=== Group 6: DB fallback when map has no entry ===");
 
   // Should resolve via DB fallback, not raw UUID
   const ingestRow = db.prepare("SELECT session_key FROM ingest_state WHERE file_path = ?").get(dbOnlyPath) as any;
-  assert(ingestRow?.session_key === DB_ONLY_KEY,
+  assert(
+    ingestRow?.session_key === DB_ONLY_KEY,
     "falls back to DB lookup when map has no entry",
-    `got ${ingestRow?.session_key}`);
+    `got ${ingestRow?.session_key}`,
+  );
 
-  const stepsUnderDbKey = (db.prepare(
-    "SELECT COUNT(*) as n FROM steps WHERE session_key = ?"
-  ).get(DB_ONLY_KEY) as any).n;
+  const stepsUnderDbKey = (db.prepare("SELECT COUNT(*) as n FROM steps WHERE session_key = ?").get(DB_ONLY_KEY) as any)
+    .n;
 
-  assert(stepsUnderDbKey > 0,
-    `steps stored under DB-resolved key (got ${stepsUnderDbKey})`);
+  assert(stepsUnderDbKey > 0, `steps stored under DB-resolved key (got ${stepsUnderDbKey})`);
 
   stop();
 }
-
 
 // ═══════════════════════════════════════════════════════════════
 console.log("\n=== Group 7: :run:UUID suffix is stripped from map keys ===");
@@ -453,17 +466,22 @@ console.log("\n=== Group 7: :run:UUID suffix is stripped from map keys ===");
   });
 
   const ingestRow = db.prepare("SELECT session_key FROM ingest_state WHERE file_path = ?").get(runPath) as any;
-  assert(ingestRow?.session_key === EXPECTED_BASE_KEY,
+  assert(
+    ingestRow?.session_key === EXPECTED_BASE_KEY,
     ":run:UUID suffix stripped from resolved key",
-    `got ${ingestRow?.session_key}`);
+    `got ${ingestRow?.session_key}`,
+  );
 
   stop();
 }
 
-
 // ─── Cleanup ───────────────────────────────────────────────────
 closeDb();
-try { rmSync(tmpHome, { recursive: true, force: true }); } catch { /* best effort */ }
+try {
+  rmSync(tmpHome, { recursive: true, force: true });
+} catch {
+  /* best effort */
+}
 
 // ─── Summary ───────────────────────────────────────────────────
 console.log(`\n${"=".repeat(50)}`);

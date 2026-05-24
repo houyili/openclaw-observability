@@ -31,8 +31,10 @@ let passed = 0;
 let failed = 0;
 const failures: string[] = [];
 function assert(cond: boolean, name: string, detail?: string) {
-  if (cond) { passed++; console.log(`  ✅ ${name}`); }
-  else {
+  if (cond) {
+    passed++;
+    console.log(`  ✅ ${name}`);
+  } else {
     failed++;
     console.log(`  ❌ ${name}${detail ? ` — ${detail}` : ""}`);
     failures.push(name);
@@ -54,10 +56,19 @@ function loadAppJs(options: { hash?: string; search?: string } = {}): LoadedCtx 
 
   class FakeClassList {
     _s = new Set<string>();
-    add(c: string) { this._s.add(c); }
-    remove(c: string) { this._s.delete(c); }
-    toggle(c: string) { if (this._s.has(c)) this._s.delete(c); else this._s.add(c); }
-    contains(c: string) { return this._s.has(c); }
+    add(c: string) {
+      this._s.add(c);
+    }
+    remove(c: string) {
+      this._s.delete(c);
+    }
+    toggle(c: string) {
+      if (this._s.has(c)) this._s.delete(c);
+      else this._s.add(c);
+    }
+    contains(c: string) {
+      return this._s.has(c);
+    }
   }
 
   function makeElement(): any {
@@ -65,12 +76,17 @@ function loadAppJs(options: { hash?: string; search?: string } = {}): LoadedCtx 
     el.innerHTML = "";
     let txt = "";
     Object.defineProperty(el, "textContent", {
-      get() { return txt; },
+      get() {
+        return txt;
+      },
       set(v: unknown) {
         txt = String(v ?? "");
         el.innerHTML = txt
-          .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
-          .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#39;");
       },
     });
     el.className = "";
@@ -84,7 +100,9 @@ function loadAppJs(options: { hash?: string; search?: string } = {}): LoadedCtx 
     el.appendChild = (c: any) => c;
     el.removeChild = () => {};
     el.select = () => {};
-    el.add = (opt: any) => { el.options.push(opt); };
+    el.add = (opt: any) => {
+      el.options.push(opt);
+    };
     el.querySelectorAll = () => ({ forEach: (_fn: any) => {}, length: 0 });
     el.querySelector = () => makeElement();
     return el;
@@ -94,17 +112,29 @@ function loadAppJs(options: { hash?: string; search?: string } = {}): LoadedCtx 
   const fakeDoc: any = {
     getElementById(id: string) {
       let el = elementsById.get(id);
-      if (!el) { el = makeElement(); elementsById.set(id, el); }
+      if (!el) {
+        el = makeElement();
+        elementsById.set(id, el);
+      }
       return el;
     },
-    querySelectorAll() { return { forEach: (_fn: any) => {}, length: 0 }; },
-    querySelector() { return makeElement(); },
-    createElement(_tag: string) { return makeElement(); },
+    querySelectorAll() {
+      return { forEach: (_fn: any) => {}, length: 0 };
+    },
+    querySelector() {
+      return makeElement();
+    },
+    createElement(_tag: string) {
+      return makeElement();
+    },
     body: { appendChild: () => {}, removeChild: () => {} },
     execCommand: () => {},
   };
 
-  interface FakeResponse { ok: boolean; json: () => Promise<unknown>; }
+  interface FakeResponse {
+    ok: boolean;
+    json: () => Promise<unknown>;
+  }
   const fetchResponses = new Map<string, { payload: unknown; ok: boolean }>();
   const fetchCalls: Array<{ url: string; opts: any }> = [];
   async function fakeFetch(url: string, opts?: any): Promise<FakeResponse> {
@@ -178,30 +208,44 @@ function sampleTimeline(overrides: Partial<Record<string, unknown>> = {}) {
   const base = {
     turns: [
       {
-        seq: 0, ts: "2026-04-12T10:00:00Z", tsEpochMs: 0,
-        totalTokens: 2300, inputTokens: 2000, cacheReadTokens: 0, outputTokens: 300,
+        seq: 0,
+        ts: "2026-04-12T10:00:00Z",
+        tsEpochMs: 0,
+        totalTokens: 2300,
+        inputTokens: 2000,
+        cacheReadTokens: 0,
+        outputTokens: 300,
         deltaIn: null,
-        primaryTool: "read", primaryToolKind: "TOOL_CALL",
-        prevToolResultChars: 0, toolCallArgsChars: 0,
-        thinkingChars: 20, replyTextChars: 0,
+        primaryTool: "read",
+        primaryToolKind: "TOOL_CALL",
+        prevToolResultChars: 0,
+        toolCallArgsChars: 0,
+        thinkingChars: 20,
+        replyTextChars: 0,
         stepIds: ["e0", "e0:tc0"],
       },
       {
-        seq: 1, ts: "2026-04-12T10:00:01Z", tsEpochMs: 1000,
-        totalTokens: 8400, inputTokens: 8000, cacheReadTokens: 2000, outputTokens: 400,
+        seq: 1,
+        ts: "2026-04-12T10:00:01Z",
+        tsEpochMs: 1000,
+        totalTokens: 8400,
+        inputTokens: 8000,
+        cacheReadTokens: 2000,
+        outputTokens: 400,
         deltaIn: 6000,
-        primaryTool: "exec", primaryToolKind: "SKILL_EXEC",
-        prevToolResultChars: 40_000, toolCallArgsChars: 200,
-        thinkingChars: 50, replyTextChars: 100,
+        primaryTool: "exec",
+        primaryToolKind: "SKILL_EXEC",
+        prevToolResultChars: 40_000,
+        toolCallArgsChars: 200,
+        thinkingChars: 50,
+        replyTextChars: 100,
         stepIds: ["e1", "e1:tc0"],
       },
     ],
     phases: [
       { name: "spike", startSeq: 1, endSeq: 1, startTotal: 2000, endTotal: 8000, deltaTotal: 6000, note: "+6k delta" },
     ],
-    topSpikes: [
-      { seq: 1, deltaIn: 6000, primaryTool: "exec", triggerSummary: "exec grep hot.md" },
-    ],
+    topSpikes: [{ seq: 1, deltaIn: 6000, primaryTool: "exec", triggerSummary: "exec grep hot.md" }],
     cumulative: {
       totalTurns: 2,
       totalOutputTokens: 700,
@@ -229,13 +273,38 @@ function sampleTimeline(overrides: Partial<Record<string, unknown>> = {}) {
 function sampleTrace() {
   return {
     runId: "r1abcdef",
-    runs: [{ runId: "r1abcdef", startedAt: "2026-04-12T10:00:00Z", durationMs: 1000, modelSteps: 2, toolSteps: 1, status: "ok" }],
+    runs: [
+      {
+        runId: "r1abcdef",
+        startedAt: "2026-04-12T10:00:00Z",
+        durationMs: 1000,
+        modelSteps: 2,
+        toolSteps: 1,
+        status: "ok",
+      },
+    ],
     traceDurationMs: 1000,
     startedAt: "2026-04-12T10:00:00Z",
     spans: [
       { id: "s1", type: "model", label: "think A", startOffsetMs: 0, durationMs: 200, tokens: 100, status: "ok" },
-      { id: "s2", type: "tool", label: "read f.md", startOffsetMs: 200, durationMs: 300, status: "ok", inputPreview: "f.md" },
-      { id: "s3", type: "tool", label: "exec boom", startOffsetMs: 500, durationMs: 100, status: "error", errorText: "boom!" },
+      {
+        id: "s2",
+        type: "tool",
+        label: "read f.md",
+        startOffsetMs: 200,
+        durationMs: 300,
+        status: "ok",
+        inputPreview: "f.md",
+      },
+      {
+        id: "s3",
+        type: "tool",
+        label: "exec boom",
+        startOffsetMs: 500,
+        durationMs: 100,
+        status: "error",
+        errorText: "boom!",
+      },
     ],
   };
 }
@@ -275,8 +344,10 @@ console.log("\n=== Group 2: renderContextView (full fixture) ===");
   assert(html.includes("Tool result inflow"), "bucket label: tool result inflow");
   assert(html.includes("MCP context inflow"), "bucket label: mcp");
   assert(html.includes("Unaccounted"), "bucket label: unaccounted");
-  assert(html.includes("bucket-baseline") && html.includes("bucket-tool") && html.includes("bucket-unacc"),
-    "all 5 bucket CSS classes present");
+  assert(
+    html.includes("bucket-baseline") && html.includes("bucket-tool") && html.includes("bucket-unacc"),
+    "all 5 bucket CSS classes present",
+  );
 
   assert(html.includes("context-insight"), "insight banner rendered");
   assert(html.includes("99% of context burned"), "insight banner text rendered");
@@ -320,14 +391,17 @@ console.log("\n=== Group 3: renderContextView degraded input ===");
   assert(!html.includes("context-repeated-reads"), "repeated reads hidden when empty");
   assert(!html.includes("context-insight"), "insight banner hidden when null");
   // stuck verdict should still render the pill
-  const stuck = render(sampleBreakdown(), sampleTimeline({
-    loopFlags: {
-      suspectedLoopWindows: [{ startSeq: 0, endSeq: 10, turns: 10, reason: "loop" }],
-      repeatedFileReads: [],
-      consecutiveNoWriteTurns: 10,
-      healthVerdict: "stuck",
-    },
-  }));
+  const stuck = render(
+    sampleBreakdown(),
+    sampleTimeline({
+      loopFlags: {
+        suspectedLoopWindows: [{ startSeq: 0, endSeq: 10, turns: 10, reason: "loop" }],
+        repeatedFileReads: [],
+        consecutiveNoWriteTurns: 10,
+        healthVerdict: "stuck",
+      },
+    }),
+  );
   assert(stuck.includes("context-loop-warn") && stuck.includes("stuck"), "stuck verdict pill rendered");
   assert(stuck.includes("verdict-stuck"), "stuck verdict cell class rendered");
 }
@@ -337,7 +411,12 @@ console.log("\n=== Group 4: refreshDetail integration ===");
 {
   const loaded = loadAppJs();
   loaded.setFetchResponse("/trace", sampleTrace());
-  loaded.setFetchResponse("/context", { runId: "r1", runs: [], breakdown: sampleBreakdown(), timeline: sampleTimeline() });
+  loaded.setFetchResponse("/context", {
+    runId: "r1",
+    runs: [],
+    breakdown: sampleBreakdown(),
+    timeline: sampleTimeline(),
+  });
   await loaded.ctx.refreshDetail("sess:key:1");
   const html = loaded.getDetailHtml();
 
@@ -385,15 +464,22 @@ console.log("\n=== Group 5: refreshDetail with missing context data ===");
   const html = loaded.getDetailHtml();
   assert(html.includes("trace-container"), "trace renders normally");
   assert(html.includes("No context data"), "context section shows placeholder");
-  assert(html.includes("detail-section-trace") && html.includes("detail-section-context"),
-    "BOTH section wrappers still rendered");
+  assert(
+    html.includes("detail-section-trace") && html.includes("detail-section-context"),
+    "BOTH section wrappers still rendered",
+  );
 }
 
 // ─── Group 6: refreshDetail is resilient to missing trace ──
 console.log("\n=== Group 6: refreshDetail with missing trace data ===");
 {
   const loaded = loadAppJs();
-  loaded.setFetchResponse("/context", { runId: "r1", runs: [], breakdown: sampleBreakdown(), timeline: sampleTimeline() });
+  loaded.setFetchResponse("/context", {
+    runId: "r1",
+    runs: [],
+    breakdown: sampleBreakdown(),
+    timeline: sampleTimeline(),
+  });
   // trace endpoint returns {} → spans.length === 0 → placeholder
   await loaded.ctx.refreshDetail("sess:key:3");
   const html = loaded.getDetailHtml();
@@ -406,7 +492,12 @@ console.log("\n=== Group 7: repeated refreshDetail stays stable ===");
 {
   const loaded = loadAppJs();
   loaded.setFetchResponse("/trace", sampleTrace());
-  loaded.setFetchResponse("/context", { runId: "r1", runs: [], breakdown: sampleBreakdown(), timeline: sampleTimeline() });
+  loaded.setFetchResponse("/context", {
+    runId: "r1",
+    runs: [],
+    breakdown: sampleBreakdown(),
+    timeline: sampleTimeline(),
+  });
   // Simulate the 5s polling path: refreshDetail called 3 times in a row.
   for (let i = 0; i < 3; i++) {
     await loaded.ctx.refreshDetail("sess:key:loop");
@@ -432,10 +523,14 @@ console.log("\n=== Group 8: structural file invariants ===");
   assert(source.includes("detail-section-trace"), "trace section class present");
   assert(source.includes("detail-section-context"), "context section class present");
   // The 5s poll path from refreshSessions must go through refreshDetail, not refreshTrace.
-  assert(/refreshSessions[\s\S]*refreshDetail\(expandedSessionKey,\s*expandedSessionId\)/.test(source),
-    "refreshSessions calls refreshDetail on poll");
-  assert(!/refreshSessions[\s\S]*refreshTrace\(expandedSessionKey\)/.test(source),
-    "refreshSessions does NOT call refreshTrace directly");
+  assert(
+    /refreshSessions[\s\S]*refreshDetail\(expandedSessionKey,\s*expandedSessionId\)/.test(source),
+    "refreshSessions calls refreshDetail on poll",
+  );
+  assert(
+    !/refreshSessions[\s\S]*refreshTrace\(expandedSessionKey\)/.test(source),
+    "refreshSessions does NOT call refreshTrace directly",
+  );
 
   const css = readFileSync(join(REPO_ROOT, "src/frontend/style.css"), "utf-8");
   assert(css.includes(".detail-section"), "stacked detail-section CSS present");
@@ -450,11 +545,10 @@ console.log("\n=== Group 9: authFetch token transport ===");
   const loaded = loadAppJs({ hash: "#token=abc%20123" });
   loaded.setFetchResponse("/api/summary", { totalSessions: 1 });
   await loaded.ctx.refreshSummary();
-  const call = loaded.fetchCalls.find(c => c.url.includes("/api/summary"));
+  const call = loaded.fetchCalls.find((c) => c.url.includes("/api/summary"));
   assert(!!call, "summary request captured");
   assert(call?.url === "/api/summary", "auth token is not appended to API query string", `url=${call?.url}`);
-  assert(call?.opts?.headers?.Authorization === "Bearer abc 123",
-    "auth token is sent with Authorization header");
+  assert(call?.opts?.headers?.Authorization === "Bearer abc 123", "auth token is sent with Authorization header");
 }
 
 // ─── Summary ───────────────────────────────────────────────────

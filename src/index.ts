@@ -1,16 +1,25 @@
 import { statSync } from "node:fs";
+import { startServer } from "./api/server.ts";
 import { CONFIG } from "./config.ts";
-import { getDb, closeDb } from "./storage/db.ts";
-import { startTranscriptWatcher } from "./ingest/transcript-watcher.ts";
-import { startHookReminderWatcher } from "./ingest/hook-reminder-reader.ts";
 import { pollAuthSessionsAsync, readSessionStoreExtras } from "./ingest/auth-poller.ts";
+import { startHookReminderWatcher } from "./ingest/hook-reminder-reader.ts";
 import { readLatestOtelStates } from "./ingest/otel-reader.ts";
 import { scanAll } from "./ingest/registry-scanner.ts";
-import { upsertAuthSessions, recomputeSessionCounts, recomputeAllSessionCounts, recomputeAllSessionOps, updateSessionDiagState, updateSessionLabel, updateSessionParent, updateSessionBlocker } from "./storage/sessions-repo.ts";
-import { upsertSteps } from "./storage/steps-repo.ts";
-import { upsertRegistryEntries, touchRegistryEntry } from "./storage/registry-repo.ts";
-import { startServer } from "./api/server.ts";
 import type { ParsedRun } from "./ingest/transcript-parser.ts";
+import { startTranscriptWatcher } from "./ingest/transcript-watcher.ts";
+import { closeDb, getDb } from "./storage/db.ts";
+import { touchRegistryEntry, upsertRegistryEntries } from "./storage/registry-repo.ts";
+import {
+  recomputeAllSessionCounts,
+  recomputeAllSessionOps,
+  recomputeSessionCounts,
+  updateSessionBlocker,
+  updateSessionDiagState,
+  updateSessionLabel,
+  updateSessionParent,
+  upsertAuthSessions,
+} from "./storage/sessions-repo.ts";
+import { upsertSteps } from "./storage/steps-repo.ts";
 
 console.log("[observability-v2] Starting...");
 console.log(`  DB: ${CONFIG.DB_PATH}`);
@@ -22,7 +31,9 @@ getDb();
 // ─── Registry scan (one-time at startup) ────────────────────────
 const registryEntries = scanAll();
 upsertRegistryEntries(registryEntries);
-console.log(`[registry] Scanned ${registryEntries.length} entries (${registryEntries.filter(e => e.type === "skill").length} skills, ${registryEntries.filter(e => e.type === "script").length} scripts, ${registryEntries.filter(e => e.type === "mcp").length} MCPs)`);
+console.log(
+  `[registry] Scanned ${registryEntries.length} entries (${registryEntries.filter((e) => e.type === "skill").length} skills, ${registryEntries.filter((e) => e.type === "script").length} scripts, ${registryEntries.filter((e) => e.type === "mcp").length} MCPs)`,
+);
 
 // ─── Auth session poller (async — never blocks HTTP server) ─────
 function doAuthPoll(): void {
@@ -51,7 +62,11 @@ let lastOtelMtime = 0;
 function doOtelRead(): void {
   try {
     let mtime = 0;
-    try { mtime = statSync(CONFIG.OTEL_EVENTS_FILE).mtimeMs; } catch { return; }
+    try {
+      mtime = statSync(CONFIG.OTEL_EVENTS_FILE).mtimeMs;
+    } catch {
+      return;
+    }
     if (mtime === lastOtelMtime) return;
     lastOtelMtime = mtime;
 
@@ -101,11 +116,11 @@ const watcher = startTranscriptWatcher({
       for (const step of run.steps) {
         // Lazy-load new skills/scripts/MCPs into registry (with path from input preview)
         if (step.skillName) {
-          const skillDir = CONFIG.OPENCLAW_HOME + "/skills/" + step.skillName;
+          const skillDir = `${CONFIG.OPENCLAW_HOME}/skills/${step.skillName}`;
           touchRegistryEntry("skill", step.skillName, skillDir);
         }
         if (step.scriptName && step.skillName) {
-          const scriptPath = CONFIG.OPENCLAW_HOME + "/skills/" + step.skillName + "/scripts/" + step.scriptName;
+          const scriptPath = `${CONFIG.OPENCLAW_HOME}/skills/${step.skillName}/scripts/${step.scriptName}`;
           touchRegistryEntry("script", step.scriptName, scriptPath);
         } else if (step.scriptName) {
           touchRegistryEntry("script", step.scriptName);
@@ -127,7 +142,7 @@ const watcher = startTranscriptWatcher({
     dirtyBaseKeys.add(sessionKey);
 
     // Set currentOp from the latest running step
-    const lastRunningStep = runs[runs.length - 1]?.steps.filter(s => s.isCurrent).pop();
+    const lastRunningStep = runs[runs.length - 1]?.steps.filter((s) => s.isCurrent).pop();
     if (lastRunningStep) {
       updateSessionDiagState(sessionKey, "processing", lastRunningStep.toolName || lastRunningStep.nodeType);
     }

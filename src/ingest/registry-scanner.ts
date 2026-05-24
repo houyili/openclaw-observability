@@ -1,4 +1,4 @@
-import { readdirSync, existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { CONFIG } from "../config.ts";
 
@@ -20,7 +20,7 @@ function getSkillSearchDirs(): string[] {
       dirs.push(join(home, entry.name, "skills"));
     }
   }
-  return dirs.filter(d => existsSync(d));
+  return dirs.filter((d) => existsSync(d));
 }
 
 export function scanSkills(): RegistryEntry[] {
@@ -79,12 +79,13 @@ function entriesFromConfigObject(cfg: any, sourcePath: string, now: string): Reg
       if (!name || typeof name !== "string") continue;
       if (seen.has(name)) continue;
       seen.add(name);
-      const b = body && typeof body === "object" ? body as Record<string, unknown> : {};
-      const path = (typeof b.command === "string" && b.command)
-        || (typeof b.baseUrl === "string" && b.baseUrl)
-        || (typeof b.url === "string" && b.url)
-        || (typeof b.endpoint === "string" && b.endpoint)
-        || sourcePath;
+      const b = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
+      const path =
+        (typeof b.command === "string" && b.command) ||
+        (typeof b.baseUrl === "string" && b.baseUrl) ||
+        (typeof b.url === "string" && b.url) ||
+        (typeof b.endpoint === "string" && b.endpoint) ||
+        sourcePath;
       out.push({
         type: "mcp",
         name,
@@ -129,7 +130,11 @@ export function scanMcpFromMcpDir(): RegistryEntry[] {
   const dir = join(CONFIG.OPENCLAW_HOME, "mcp");
   if (!existsSync(dir)) return [];
   let files: string[];
-  try { files = readdirSync(dir); } catch { return []; }
+  try {
+    files = readdirSync(dir);
+  } catch {
+    return [];
+  }
   const now = new Date().toISOString();
   const seen = new Set<string>();
   const out: RegistryEntry[] = [];
@@ -138,7 +143,11 @@ export function scanMcpFromMcpDir(): RegistryEntry[] {
     // Skip example/template files to avoid surfacing fake "auth" entries.
     if (f.includes(".example.") || f.endsWith(".template.json")) continue;
     const full = join(dir, f);
-    try { if (!statSync(full).isFile()) continue; } catch { continue; }
+    try {
+      if (!statSync(full).isFile()) continue;
+    } catch {
+      continue;
+    }
     const cfg = safeReadJson(full);
     if (!cfg) continue;
     for (const entry of entriesFromConfigObject(cfg, full, now)) {

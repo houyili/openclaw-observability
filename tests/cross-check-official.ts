@@ -23,14 +23,14 @@ import { execSync } from "node:child_process";
 import { DatabaseSync } from "node:sqlite";
 import { setTimeout as sleep } from "node:timers/promises";
 import { CONFIG } from "../src/config.ts";
-import { redactKey, redactId } from "./_lib/redact.ts";
+import { redactId, redactKey } from "./_lib/redact.ts";
 
 // ─── Config ─────────────────────────────────────────────────────
 
 const args = process.argv.slice(2);
 function argValue(flag: string, fallback: string): string {
   const i = args.indexOf(flag);
-  return (i >= 0 && args[i + 1]) ? args[i + 1] : fallback;
+  return i >= 0 && args[i + 1] ? args[i + 1] : fallback;
 }
 const ACTIVE_MINUTES = parseInt(argValue("--active", "60"), 10);
 const TOLERANCE = parseInt(argValue("--tolerance", "0"), 10);
@@ -65,20 +65,23 @@ function fetchOfficial(): OfficialSession[] {
     process.exit(1);
   }
   let parsed: any;
-  try { parsed = JSON.parse(raw); }
-  catch {
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
     console.error("[cross-check] FATAL: openclaw CLI returned non-JSON");
     process.exit(1);
   }
   const list: any[] = Array.isArray(parsed) ? parsed : parsed.sessions || [];
-  return list.map((s) => ({
-    key: s.key || "",
-    sessionId: s.sessionId || "",
-    inputTokens: s.inputTokens || 0,
-    outputTokens: s.outputTokens || 0,
-    totalTokens: s.totalTokens || 0,
-    model: s.model || "",
-  })).filter(s => s.key);
+  return list
+    .map((s) => ({
+      key: s.key || "",
+      sessionId: s.sessionId || "",
+      inputTokens: s.inputTokens || 0,
+      outputTokens: s.outputTokens || 0,
+      totalTokens: s.totalTokens || 0,
+      model: s.model || "",
+    }))
+    .filter((s) => s.key);
 }
 
 // ─── Read obs.db sessions by composite (key, sessionId) ─────────
@@ -86,7 +89,14 @@ function fetchOfficial(): OfficialSession[] {
 // `WHERE session_key = ?` with LIMIT 1 returns the wrong row. We pin by
 // (session_key, session_id) which matches the sessions PRIMARY KEY.
 
-interface ObsRow { input: number; output: number; total: number; source: string; tokenSource: string; model: string }
+interface ObsRow {
+  input: number;
+  output: number;
+  total: number;
+  source: string;
+  tokenSource: string;
+  model: string;
+}
 
 function isAllowedOfficialZeroBackfill(obs: ObsRow, officialValue: number, obsValue: number): boolean {
   if (officialValue !== 0 || obsValue <= 0) return false;
@@ -142,7 +152,7 @@ function compareOnce(): CompareOutcome {
     return { official, obsData: new Map(), mismatches: [], allowedBackfills: [], missing: [] };
   }
 
-  const obsData = readObsDb(official.map(s => ({ key: s.key, sessionId: s.sessionId })));
+  const obsData = readObsDb(official.map((s) => ({ key: s.key, sessionId: s.sessionId })));
   console.log(`[cross-check] obs.db covered ${obsData.size}/${official.length} of them (composite key)`);
 
   const mismatches: Mismatch[] = [];
@@ -151,10 +161,13 @@ function compareOnce(): CompareOutcome {
 
   for (const off of official) {
     const obs = obsData.get(`${off.key}|${off.sessionId}`);
-    if (!obs) { missing.push({ key: off.key, sessionId: off.sessionId }); continue; }
+    if (!obs) {
+      missing.push({ key: off.key, sessionId: off.sessionId });
+      continue;
+    }
     const fields: Array<[string, number, number]> = [
-      ["total_tokens",  off.totalTokens,  obs.total],
-      ["input_tokens",  off.inputTokens,  obs.input],
+      ["total_tokens", off.totalTokens, obs.total],
+      ["input_tokens", off.inputTokens, obs.input],
       ["output_tokens", off.outputTokens, obs.output],
     ];
     for (const [field, o, a] of fields) {
@@ -176,7 +189,9 @@ let { official, obsData, mismatches, allowedBackfills, missing } = compareOnce()
 // Retry once if the first pass failed — auth-poller runs every 30 s, so a
 // brand-new session can legitimately be in obs.db a few seconds stale.
 if ((mismatches.length > 0 || missing.length > 0) && RETRY_WAIT_SEC > 0 && official.length > 0) {
-  console.log(`\n[cross-check] first-pass drift detected; sleeping ${RETRY_WAIT_SEC}s and retrying to rule out auth-poller lag ...`);
+  console.log(
+    `\n[cross-check] first-pass drift detected; sleeping ${RETRY_WAIT_SEC}s and retrying to rule out auth-poller lag ...`,
+  );
   await sleep(RETRY_WAIT_SEC * 1000);
   ({ official, obsData, mismatches, allowedBackfills, missing } = compareOnce());
 }

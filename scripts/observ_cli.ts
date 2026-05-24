@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+
 /**
  * Round 6 — observ_cli entry point.
  *
@@ -13,10 +14,10 @@
  *   bash workspace/skills/dashboard-tunnel/scripts/get_dashboard_url.sh /observ status
  */
 
-import { DatabaseSync } from "node:sqlite";
 import { existsSync } from "node:fs";
-import { CONFIG } from "../src/config.ts";
+import { DatabaseSync } from "node:sqlite";
 import { dispatch } from "../src/cli/dispatcher.ts";
+import { CONFIG } from "../src/config.ts";
 
 function main(): void {
   if (!existsSync(CONFIG.DB_PATH)) {
@@ -34,7 +35,7 @@ function main(): void {
 
   try {
     const result = dispatch(db, process.argv.slice(2));
-    process.stdout.write(result.text + "\n");
+    process.stdout.write(`${result.text}\n`);
     process.exit(result.exitCode);
   } finally {
     db.close();

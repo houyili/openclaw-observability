@@ -1,4 +1,4 @@
-import { statSync, openSync, readSync, closeSync } from "node:fs";
+import { closeSync, openSync, readSync, statSync } from "node:fs";
 import { CONFIG } from "../config.ts";
 
 export interface OtelSessionState {
@@ -15,7 +15,7 @@ export function readLatestOtelStates(): Map<string, OtelSessionState> {
   const map = new Map<string, OtelSessionState>();
   const filePath = CONFIG.OTEL_EVENTS_FILE;
 
-  let stat;
+  let stat: ReturnType<typeof statSync>;
   try {
     stat = statSync(filePath);
   } catch {
@@ -33,7 +33,7 @@ export function readLatestOtelStates(): Map<string, OtelSessionState> {
 
     for (const line of lines) {
       if (!line.trim()) continue;
-      let evt;
+      let evt: any;
       try {
         evt = JSON.parse(line);
       } catch {

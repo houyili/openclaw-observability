@@ -10,13 +10,15 @@
  *     tests/redact.test.ts
  */
 
-import { redactKey, redactId } from "./_lib/redact.ts";
+import { redactId, redactKey } from "./_lib/redact.ts";
 
 let passed = 0;
 let failed = 0;
 function assert(cond: boolean, name: string, detail?: string) {
-  if (cond) { passed++; console.log(`  ✅ ${name}`); }
-  else {
+  if (cond) {
+    passed++;
+    console.log(`  ✅ ${name}`);
+  } else {
     failed++;
     console.log(`  ❌ ${name}${detail ? ` — ${detail}` : ""}`);
   }
@@ -41,12 +43,24 @@ console.log("\n=== redactKey on group / cron / subagent variants ===");
   // 4-segment and 5-segment branches of `redactKey` — not to embed
   // any real local chat / group / user identifier.
   const variants: Array<[string, string, string, string]> = [
-    ["lark-group",  "agent:demo:lark:group:syntheticGroupId1111aaaa",
-     "agent:demo:lark:group:",  "syntheticGroupId1111aaaa"],
-    ["cron-4parts", "agent:demo:cron:00000000-1111-2222-3333-44445555bbbb",
-     "agent:demo:cron:",        "00000000-1111-2222-3333-44445555bbbb"],
-    ["chat-direct", "agent:demo:chat:direct:syntheticUserId2222cccc",
-     "agent:demo:chat:direct:", "syntheticUserId2222cccc"],
+    [
+      "lark-group",
+      "agent:demo:lark:group:syntheticGroupId1111aaaa",
+      "agent:demo:lark:group:",
+      "syntheticGroupId1111aaaa",
+    ],
+    [
+      "cron-4parts",
+      "agent:demo:cron:00000000-1111-2222-3333-44445555bbbb",
+      "agent:demo:cron:",
+      "00000000-1111-2222-3333-44445555bbbb",
+    ],
+    [
+      "chat-direct",
+      "agent:demo:chat:direct:syntheticUserId2222cccc",
+      "agent:demo:chat:direct:",
+      "syntheticUserId2222cccc",
+    ],
   ];
   for (const [tag, v, prefix, tail] of variants) {
     const r = redactKey(v);
@@ -73,11 +87,9 @@ console.log("\n=== redactKey edge cases ===");
   assert(redactKey("") === "(none)", "empty → (none)");
   // 1- and 2-part keys do not match any known OpenClaw shape; hash them.
   const r1 = redactKey("foo");
-  assert(r1.startsWith("<") && r1.endsWith("...foo"),
-    "1-part non-structured key is hashed");
+  assert(r1.startsWith("<") && r1.endsWith("...foo"), "1-part non-structured key is hashed");
   const r2 = redactKey("foo:bar");
-  assert(!r2.includes("foo:bar") || r2.startsWith("<"),
-    "2-part non-structured key is hashed");
+  assert(!r2.includes("foo:bar") || r2.startsWith("<"), "2-part non-structured key is hashed");
 }
 
 console.log("\n=== redactId ===");
@@ -99,8 +111,7 @@ console.log("\n=== correlation: same input → same output ===");
   const k2 = "agent:demo:lark:direct:syntheticUserAlphaXXXXXXXXXXXX1234";
   const k3 = "agent:demo:lark:direct:syntheticUserBetaYYYYYYYYYYYYY1234";
   assert(redactKey(k1) === redactKey(k2), "two messages about the same key match");
-  assert(redactKey(k1) !== redactKey(k3),
-    "two different keys with the same prefix and suffix-4 don't collide");
+  assert(redactKey(k1) !== redactKey(k3), "two different keys with the same prefix and suffix-4 don't collide");
 }
 
 console.log(`\nredact: ${passed} passed, ${failed} failed`);

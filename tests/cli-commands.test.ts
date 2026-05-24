@@ -17,16 +17,18 @@
  *   - /observ help → mentions every other subcommand
  */
 
-import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 let passed = 0;
 let failed = 0;
 const failures: string[] = [];
 function assert(cond: boolean, name: string, detail?: string) {
-  if (cond) { passed++; console.log(`  ✅ ${name}`); }
-  else {
+  if (cond) {
+    passed++;
+    console.log(`  ✅ ${name}`);
+  } else {
     failed++;
     console.log(`  ❌ ${name}${detail ? ` — ${detail}` : ""}`);
     failures.push(name);
@@ -50,28 +52,143 @@ const now = Date.now();
 // 5 sessions: 2 stuck, 1 with errors, 2 idle
 const sessionRows = [
   // 2 stuck
-  ["agent:test:s1", "sid-1", "main",  "chat-direct", "user:demo-a", null, "direct",
-    "gpt-5", "modelhub", 5000, 200, 5200, 100000, "default",
-    1, 0, 0, 0, "stuck", "exec", "exec",
-    now - 60_000, now, 60_000, "transcript+auth"],
-  ["agent:test:s2", "sid-2", "main",  "chat-group",  "group:oc_b", null, "group",
-    "gpt-5", "modelhub", 8000, 300, 8300, 120000, "fast",
-    2, 1, 0, 0, "stuck", "read", "read",
-    now - 30_000, now, 30_000, "transcript+auth"],
+  [
+    "agent:test:s1",
+    "sid-1",
+    "main",
+    "chat-direct",
+    "user:demo-a",
+    null,
+    "direct",
+    "gpt-5",
+    "modelhub",
+    5000,
+    200,
+    5200,
+    100000,
+    "default",
+    1,
+    0,
+    0,
+    0,
+    "stuck",
+    "exec",
+    "exec",
+    now - 60_000,
+    now,
+    60_000,
+    "transcript+auth",
+  ],
+  [
+    "agent:test:s2",
+    "sid-2",
+    "main",
+    "chat-group",
+    "group:oc_b",
+    null,
+    "group",
+    "gpt-5",
+    "modelhub",
+    8000,
+    300,
+    8300,
+    120000,
+    "fast",
+    2,
+    1,
+    0,
+    0,
+    "stuck",
+    "read",
+    "read",
+    now - 30_000,
+    now,
+    30_000,
+    "transcript+auth",
+  ],
   // 1 with no stuck blocker but with errors
-  ["agent:test:s3", "sid-3", "main",  "chat-direct", "user:demo-c", null, "direct",
-    "gpt-5", "modelhub", 30000, 1500, 31500, 80000, "default",
-    5, 4, 1, 1, "idle", "write", null,
-    null, now - 100, 0, "transcript+auth"],
+  [
+    "agent:test:s3",
+    "sid-3",
+    "main",
+    "chat-direct",
+    "user:demo-c",
+    null,
+    "direct",
+    "gpt-5",
+    "modelhub",
+    30000,
+    1500,
+    31500,
+    80000,
+    "default",
+    5,
+    4,
+    1,
+    1,
+    "idle",
+    "write",
+    null,
+    null,
+    now - 100,
+    0,
+    "transcript+auth",
+  ],
   // 2 idle
-  ["agent:test:s4", "sid-4", "demo", "chat-group", "group:oc_d", null, "group",
-    "gpt-5", "modelhub", 12000, 800, 12800, 60000, "default",
-    3, 2, 0, 0, "idle", null, null,
-    null, now - 200, 0, "transcript+auth"],
-  ["agent:test:s5", "sid-5", "survey", "chat-direct", "user:demo-e", null, "direct",
-    "gpt-5", "modelhub", 6000, 100, 6100, 40000, "default",
-    1, 0, 0, 0, "idle", null, null,
-    null, now - 300, 0, "transcript+auth"],
+  [
+    "agent:test:s4",
+    "sid-4",
+    "demo",
+    "chat-group",
+    "group:oc_d",
+    null,
+    "group",
+    "gpt-5",
+    "modelhub",
+    12000,
+    800,
+    12800,
+    60000,
+    "default",
+    3,
+    2,
+    0,
+    0,
+    "idle",
+    null,
+    null,
+    null,
+    now - 200,
+    0,
+    "transcript+auth",
+  ],
+  [
+    "agent:test:s5",
+    "sid-5",
+    "survey",
+    "chat-direct",
+    "user:demo-e",
+    null,
+    "direct",
+    "gpt-5",
+    "modelhub",
+    6000,
+    100,
+    6100,
+    40000,
+    "default",
+    1,
+    0,
+    0,
+    0,
+    "idle",
+    null,
+    null,
+    null,
+    now - 300,
+    0,
+    "transcript+auth",
+  ],
 ];
 const sessInsert = db.prepare(`INSERT INTO sessions
   (session_key, session_id, agent_id, channel, diag, label, kind,
@@ -79,7 +196,7 @@ const sessInsert = db.prepare(`INSERT INTO sessions
    llm_call_count, tool_call_count, skill_call_count, mcp_call_count,
    diag_state, current_op, blocker, last_block_ts, updated_at, age_ms, source)
   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
-for (const r of sessionRows) sessInsert.run(...r as any[]);
+for (const r of sessionRows) sessInsert.run(...(r as any[]));
 
 // Steps: a few skill_exec, a few mcp_call (with one error), a few errors
 const stepInsert = db.prepare(`INSERT INTO steps
@@ -92,31 +209,220 @@ const stepInsert = db.prepare(`INSERT INTO steps
 const isoNow = (offsetMs = 0) => new Date(now + offsetMs).toISOString();
 const stepRows = [
   // 3 skill calls — paper-interpretation (most-used)
-  ["st-skill-1", "agent:test:s3", "run-1", null, 0, isoNow(-50_000), now - 50_000,
-   "assistant", "SKILL_EXEC", "exec", null, "paper-interpretation", "render.py", null, null,
-   1200, null, 50, 100, 200, null, "ok", null, null, 0, 0, "py render", null],
-  ["st-skill-2", "agent:test:s3", "run-1", null, 1, isoNow(-49_000), now - 49_000,
-   "assistant", "SKILL_EXEC", "exec", null, "paper-interpretation", "render.py", null, null,
-   900, null, 30, 100, 200, null, "ok", null, null, 0, 0, "py render", null],
-  ["st-skill-3", "agent:test:s4", "run-2", null, 0, isoNow(-40_000), now - 40_000,
-   "assistant", "SKILL_EXEC", "exec", null, "lark-docs-api-first", "fetch.sh", null, null,
-   500, null, 20, 100, 200, null, "ok", null, null, 0, 0, "fetch", null],
+  [
+    "st-skill-1",
+    "agent:test:s3",
+    "run-1",
+    null,
+    0,
+    isoNow(-50_000),
+    now - 50_000,
+    "assistant",
+    "SKILL_EXEC",
+    "exec",
+    null,
+    "paper-interpretation",
+    "render.py",
+    null,
+    null,
+    1200,
+    null,
+    50,
+    100,
+    200,
+    null,
+    "ok",
+    null,
+    null,
+    0,
+    0,
+    "py render",
+    null,
+  ],
+  [
+    "st-skill-2",
+    "agent:test:s3",
+    "run-1",
+    null,
+    1,
+    isoNow(-49_000),
+    now - 49_000,
+    "assistant",
+    "SKILL_EXEC",
+    "exec",
+    null,
+    "paper-interpretation",
+    "render.py",
+    null,
+    null,
+    900,
+    null,
+    30,
+    100,
+    200,
+    null,
+    "ok",
+    null,
+    null,
+    0,
+    0,
+    "py render",
+    null,
+  ],
+  [
+    "st-skill-3",
+    "agent:test:s4",
+    "run-2",
+    null,
+    0,
+    isoNow(-40_000),
+    now - 40_000,
+    "assistant",
+    "SKILL_EXEC",
+    "exec",
+    null,
+    "lark-docs-api-first",
+    "fetch.sh",
+    null,
+    null,
+    500,
+    null,
+    20,
+    100,
+    200,
+    null,
+    "ok",
+    null,
+    null,
+    0,
+    0,
+    "fetch",
+    null,
+  ],
   // 2 MCP calls — one rate_limited
-  ["st-mcp-1", "agent:test:s3", "run-1", null, 2, isoNow(-30_000), now - 30_000,
-   "assistant", "MCP_CALL", "lark_search_doc_wiki", null, null, null, "lark", "lark_search_doc_wiki",
-   2000, null, 80, 200, 1500, 200, "ok", null, null, 0, 0, "search", null],
-  ["st-mcp-2", "agent:test:s3", "run-1", null, 3, isoNow(-20_000), now - 20_000,
-   "assistant", "MCP_CALL", "api-post-search", null, null, null, "notion", "api-post-search",
-   3000, null, 50, 200, 800, 100, "error", "HTTP 429 rate limit hit on notion api", "rate_limit", 0, 0, "search", null],
+  [
+    "st-mcp-1",
+    "agent:test:s3",
+    "run-1",
+    null,
+    2,
+    isoNow(-30_000),
+    now - 30_000,
+    "assistant",
+    "MCP_CALL",
+    "lark_search_doc_wiki",
+    null,
+    null,
+    null,
+    "lark",
+    "lark_search_doc_wiki",
+    2000,
+    null,
+    80,
+    200,
+    1500,
+    200,
+    "ok",
+    null,
+    null,
+    0,
+    0,
+    "search",
+    null,
+  ],
+  [
+    "st-mcp-2",
+    "agent:test:s3",
+    "run-1",
+    null,
+    3,
+    isoNow(-20_000),
+    now - 20_000,
+    "assistant",
+    "MCP_CALL",
+    "api-post-search",
+    null,
+    null,
+    null,
+    "notion",
+    "api-post-search",
+    3000,
+    null,
+    50,
+    200,
+    800,
+    100,
+    "error",
+    "HTTP 429 rate limit hit on notion api",
+    "rate_limit",
+    0,
+    0,
+    "search",
+    null,
+  ],
   // 2 recent errors (timeout + auth_error)
-  ["st-err-1", "agent:test:s4", "run-2", null, 1, isoNow(-10_000), now - 10_000,
-   "assistant", "TOOL_CALL", "exec", null, null, null, null, null,
-   30000, null, 5, 50, 0, null, "error", "Request timed out ETIMEDOUT after 30s", "timeout", 0, 0, "exec curl", null],
-  ["st-err-2", "agent:test:s5", "run-3", null, 0, isoNow(-5_000), now - 5_000,
-   "assistant", "MCP_CALL", "lark_create_doc", null, null, null, "lark", "lark_create_doc",
-   500, null, 10, 30, 0, null, "error", "need_user_authorization", "auth_error", 0, 0, "create doc", null],
+  [
+    "st-err-1",
+    "agent:test:s4",
+    "run-2",
+    null,
+    1,
+    isoNow(-10_000),
+    now - 10_000,
+    "assistant",
+    "TOOL_CALL",
+    "exec",
+    null,
+    null,
+    null,
+    null,
+    null,
+    30000,
+    null,
+    5,
+    50,
+    0,
+    null,
+    "error",
+    "Request timed out ETIMEDOUT after 30s",
+    "timeout",
+    0,
+    0,
+    "exec curl",
+    null,
+  ],
+  [
+    "st-err-2",
+    "agent:test:s5",
+    "run-3",
+    null,
+    0,
+    isoNow(-5_000),
+    now - 5_000,
+    "assistant",
+    "MCP_CALL",
+    "lark_create_doc",
+    null,
+    null,
+    null,
+    "lark",
+    "lark_create_doc",
+    500,
+    null,
+    10,
+    30,
+    0,
+    null,
+    "error",
+    "need_user_authorization",
+    "auth_error",
+    0,
+    0,
+    "create doc",
+    null,
+  ],
 ];
-for (const r of stepRows) stepInsert.run(...r as any[]);
+for (const r of stepRows) stepInsert.run(...(r as any[]));
 
 // Registry — needs entries for skill stats
 const regInsert = db.prepare(`INSERT INTO registry (type, name, path, status, discovered_at, last_seen_at)
@@ -130,8 +436,8 @@ regInsert.run("script", "fetch.sh", "/tmp/lark-docs-api-first/scripts/fetch.sh",
 // that "called but not in registry" rows are intentionally invisible
 // because we cannot prove they were ever installed).
 regInsert.run("mcp", "lark_search_doc_wiki", "npx lark-mcp", "active", isoNow(), isoNow());
-regInsert.run("mcp", "api-post-search", "npx notion-mcp",  "active", isoNow(), isoNow());
-regInsert.run("mcp", "lark_create_doc",    "npx lark-mcp", "active", isoNow(), isoNow());
+regInsert.run("mcp", "api-post-search", "npx notion-mcp", "active", isoNow(), isoNow());
+regInsert.run("mcp", "lark_create_doc", "npx lark-mcp", "active", isoNow(), isoNow());
 
 // ─── Helpers for assertion ──────────────────────────────────────
 const EMOJI_RE = /[\u{1F300}-\u{1FAFF}]/u;
@@ -139,11 +445,8 @@ const BOX_DRAWING_RE = /[\u2500-\u257F]/;
 
 function assertOutputClean(name: string, text: string, maxLines: number) {
   assert(text.length > 0, `${name}: non-empty output`);
-  assert(text.startsWith("*observability-v2"),
-    `${name}: starts with "*observability-v2 …*" header`);
-  assert(text.split("\n").length <= maxLines,
-    `${name}: ≤ ${maxLines} lines`,
-    `got ${text.split("\n").length}`);
+  assert(text.startsWith("*observability-v2"), `${name}: starts with "*observability-v2 …*" header`);
+  assert(text.split("\n").length <= maxLines, `${name}: ≤ ${maxLines} lines`, `got ${text.split("\n").length}`);
   assert(!EMOJI_RE.test(text), `${name}: no emojis`);
   assert(!BOX_DRAWING_RE.test(text), `${name}: no Unicode box-drawing chars`);
 }
@@ -194,8 +497,10 @@ console.log("\n=== /observ skills (default range = day) ===");
   assert(result.text.includes("(day)"), "shows '(day)' range");
   assert(result.text.includes("paper-interpretation"), "lists paper-interpretation");
   // 2 skill calls for paper-interpretation in our fixture
-  assert(result.text.includes("paper-interpretation") && /paper-interpretation\s+2\b/.test(result.text),
-    "paper-interpretation has call_count 2");
+  assert(
+    result.text.includes("paper-interpretation") && /paper-interpretation\s+2\b/.test(result.text),
+    "paper-interpretation has call_count 2",
+  );
 }
 
 console.log("\n=== /observ skills week ===");
@@ -210,8 +515,10 @@ console.log("\n=== /observ scripts ===");
   const result = dispatch(db, ["scripts"]);
   assert(result.exitCode === 0, "exit code 0");
   assertOutputClean("/observ scripts", result.text, 12);
-  assert(result.text.includes("render.py") || result.text.includes("(no script calls)"),
-    "lists render.py (or empty if no script_name match)");
+  assert(
+    result.text.includes("render.py") || result.text.includes("(no script calls)"),
+    "lists render.py (or empty if no script_name match)",
+  );
 }
 
 console.log("\n=== /observ mcps ===");
@@ -253,8 +560,7 @@ console.log("\n=== dispatcher edge cases ===");
   const r1 = dispatch(db, ["bogus"]);
   assert(r1.exitCode === 1, "unknown command exits 1");
   assert(r1.text.includes("unknown command"), "shows 'unknown command'");
-  assert(r1.text.includes("/observ help") || r1.text.includes("status"),
-    "falls back to help text");
+  assert(r1.text.includes("/observ help") || r1.text.includes("status"), "falls back to help text");
 
   // /observ skills week should pass 'week' to handler
   const r2 = dispatch(db, ["skills", "week"]);
@@ -272,7 +578,11 @@ console.log("\n=== dispatcher edge cases ===");
 }
 
 closeDb();
-try { rmSync(tmpHome, { recursive: true, force: true }); } catch { /* best effort */ }
+try {
+  rmSync(tmpHome, { recursive: true, force: true });
+} catch {
+  /* best effort */
+}
 
 console.log(`\n${"=".repeat(50)}`);
 console.log(`CLI commands: ${passed} passed, ${failed} failed`);

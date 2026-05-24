@@ -32,6 +32,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+      - name: Install dev dependencies
+        run: npm ci
+      - name: Type check
+        run: npm run typecheck
+      - name: Lint
+        run: npm run lint
       - name: Shell syntax check
         run: bash -n scripts/*.sh
       - name: Python syntax check

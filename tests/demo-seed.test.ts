@@ -22,17 +22,19 @@
  *     tests/demo-seed.test.ts
  */
 
-import { mkdtempSync, existsSync, readdirSync, readFileSync, rmSync } from "node:fs";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
 let passed = 0;
 let failed = 0;
 function assert(cond: boolean, name: string, detail?: string) {
-  if (cond) { passed++; console.log(`  ✅ ${name}`); }
-  else {
+  if (cond) {
+    passed++;
+    console.log(`  ✅ ${name}`);
+  } else {
     failed++;
     console.log(`  ❌ ${name}${detail ? ` — ${detail}` : ""}`);
   }
@@ -45,8 +47,14 @@ const TARGET = mkdtempSync(join(tmpdir(), "obs-demo-seed-"));
 console.log(`\n=== running seed against ${TARGET} ===`);
 const run = spawnSync(
   process.execPath,
-  ["--experimental-sqlite", "--experimental-strip-types", "--no-warnings",
-   SEED_SCRIPT, `--target=${TARGET}`, "--force"],
+  [
+    "--experimental-sqlite",
+    "--experimental-strip-types",
+    "--no-warnings",
+    SEED_SCRIPT,
+    `--target=${TARGET}`,
+    "--force",
+  ],
   { encoding: "utf-8" },
 );
 console.log(run.stdout);
@@ -74,36 +82,37 @@ console.log("\n=== 2. obs.db has the expected schema ===");
 const dbPath = join(TARGET, "logs", "observability-v2", "obs.db");
 assert(existsSync(dbPath), `obs.db created at ${dbPath}`);
 const db = new DatabaseSync(dbPath, { readOnly: true });
-const cols = (db.prepare("PRAGMA table_info(sessions)").all() as any[])
-  .map(r => r.name);
+const cols = (db.prepare("PRAGMA table_info(sessions)").all() as any[]).map((r) => r.name);
 for (const required of [
-  "session_key", "session_id", "agent_id", "channel", "label",
-  "token_source", "source", "total_tokens", "parent_session_key",
+  "session_key",
+  "session_id",
+  "agent_id",
+  "channel",
+  "label",
+  "token_source",
+  "source",
+  "total_tokens",
+  "parent_session_key",
 ]) {
   assert(cols.includes(required), `sessions table has ${required}`);
 }
 
 console.log("\n=== 3. pre-seeded sessions rows ===");
-const rows = db.prepare(
-  "SELECT session_key, label, channel, agent_id, source, token_source, total_tokens FROM sessions ORDER BY session_key",
-).all() as any[];
+const rows = db
+  .prepare(
+    "SELECT session_key, label, channel, agent_id, source, token_source, total_tokens FROM sessions ORDER BY session_key",
+  )
+  .all() as any[];
 assert(rows.length === 3, "3 demo sessions seeded");
 const byKey = new Map(rows.map((r: any) => [r.session_key, r]));
-assert(byKey.has("agent:demo-research:chat:direct:demo-user-alpha"),
-  "demo-research alpha session present");
-assert(byKey.has("agent:demo-research:chat:direct:demo-user-stuck"),
-  "demo-research stuck session present");
-assert(byKey.has("agent:demo-publishing:chat:direct:demo-user-alpha"),
-  "demo-publishing session present");
+assert(byKey.has("agent:demo-research:chat:direct:demo-user-alpha"), "demo-research alpha session present");
+assert(byKey.has("agent:demo-research:chat:direct:demo-user-stuck"), "demo-research stuck session present");
+assert(byKey.has("agent:demo-publishing:chat:direct:demo-user-alpha"), "demo-publishing session present");
 for (const r of rows) {
-  assert(r.label && r.label.startsWith("demo:"),
-    `${r.session_key}: label starts with 'demo:'`);
-  assert(r.source === "transcript+auth",
-    `${r.session_key}: source is transcript+auth`);
-  assert(r.token_source === "transcript-backfill",
-    `${r.session_key}: token_source is transcript-backfill`);
-  assert(typeof r.total_tokens === "number" && r.total_tokens > 0,
-    `${r.session_key}: total_tokens > 0`);
+  assert(r.label?.startsWith("demo:"), `${r.session_key}: label starts with 'demo:'`);
+  assert(r.source === "transcript+auth", `${r.session_key}: source is transcript+auth`);
+  assert(r.token_source === "transcript-backfill", `${r.session_key}: token_source is transcript-backfill`);
+  assert(typeof r.total_tokens === "number" && r.total_tokens > 0, `${r.session_key}: total_tokens > 0`);
 }
 
 console.log("\n=== 4. sessions.json per agent ===");
@@ -111,8 +120,7 @@ for (const agent of ["demo-research", "demo-publishing"]) {
   const path = join(TARGET, "agents", agent, "sessions", "sessions.json");
   assert(existsSync(path), `${agent}/sessions.json exists`);
   const cfg = JSON.parse(readFileSync(path, "utf-8"));
-  assert(typeof cfg === "object" && cfg != null,
-    `${agent}/sessions.json parses to object`);
+  assert(typeof cfg === "object" && cfg != null, `${agent}/sessions.json parses to object`);
   const entries = Object.values(cfg);
   assert(entries.length > 0, `${agent}/sessions.json has at least one entry`);
 }

@@ -288,16 +288,11 @@ function getTurnPrimaryTool(t: Turn): { name: string | null; kind: string | null
 }
 
 function getTurnPrevToolResultChars(t: Turn): number {
-  return t.precedingToolResults.reduce(
-    (n, r) => n + (r.result_text_len || 0),
-    0,
-  );
+  return t.precedingToolResults.reduce((n, r) => n + (r.result_text_len || 0), 0);
 }
 
 function getTurnToolCallArgsChars(t: Turn): number {
-  return t.assistantRows
-    .filter((r) => r !== t.anchor && r.tool_name)
-    .reduce((n, r) => n + (r.input_text_len || 0), 0);
+  return t.assistantRows.filter((r) => r !== t.anchor && r.tool_name).reduce((n, r) => n + (r.input_text_len || 0), 0);
 }
 
 function getTurnMcpDelta(t: Turn): number {
@@ -316,7 +311,11 @@ function getTurnReplyTextChars(t: Turn): number {
 
 // ─── Shared data fetch (single SQL + groupTurns) ───────────────
 
-function fetchAndGroup(sessionKey: string, runId?: string, sessionId?: string | null): { rows: RawStep[]; turns: Turn[]; resolvedRunId: string } | null {
+function fetchAndGroup(
+  sessionKey: string,
+  runId?: string,
+  sessionId?: string | null,
+): { rows: RawStep[]; turns: Turn[]; resolvedRunId: string } | null {
   const rows = getTraceSpans(sessionKey, runId, sessionId) as unknown as RawStep[];
   if (rows.length === 0) return null;
   const turns = groupTurns(rows);
@@ -352,13 +351,7 @@ export function getContextBreakdown(
   return buildBreakdown(sessionKey, data.rows, data.turns, data.resolvedRunId);
 }
 
-function buildBreakdown(
-  sessionKey: string,
-  rows: RawStep[],
-  turns: Turn[],
-  resolvedRunId: string,
-): ContextBreakdown {
-
+function buildBreakdown(sessionKey: string, _rows: RawStep[], turns: Turn[], resolvedRunId: string): ContextBreakdown {
   const baseline = getTurnPromptTokens(turns[0]);
   const totalLatest = getTurnPromptTokens(turns[turns.length - 1]);
 
@@ -439,7 +432,7 @@ function buildBreakdown(
 // ─── Fine-grained timeline ──────────────────────────────────────
 
 const SPIKE_ABS_THRESHOLD = 5_000;
-const SPIKE_REL_THRESHOLD = 0.30;
+const SPIKE_REL_THRESHOLD = 0.3;
 const LOOP_MIN_TURNS = 8;
 const LOOP_CACHE_HIT_THRESHOLD = 0.85;
 const LOOP_TOTAL_DRIFT_THRESHOLD = 0.05;
@@ -455,12 +448,7 @@ export function getContextTimeline(
   return buildTimeline(sessionKey, data.rows, data.turns, data.resolvedRunId);
 }
 
-function buildTimeline(
-  sessionKey: string,
-  rows: RawStep[],
-  turns: Turn[],
-  resolvedRunId: string,
-): ContextTimeline {
+function buildTimeline(sessionKey: string, rows: RawStep[], turns: Turn[], resolvedRunId: string): ContextTimeline {
   // ─── Per-turn rows ────────────────────────────────────────────
   const turnRows: ContextTimeline["turns"] = [];
   for (let i = 0; i < turns.length; i++) {
@@ -493,42 +481,17 @@ function buildTimeline(
   // ─── Cumulative aggregates ────────────────────────────────────
   const allToolResultRows = rows.filter((r) => r.role === "toolResult");
 
-  const totalOutputTokens = turnRows.reduce(
-    (n, t) => n + t.outputTokens,
-    0,
-  );
-  const totalThinkingChars = turnRows.reduce(
-    (n, t) => n + t.thinkingChars,
-    0,
-  );
-  const totalToolResultChars = allToolResultRows.reduce(
-    (n, r) => n + (r.result_text_len || 0),
-    0,
-  );
-  const totalToolCallArgsChars = turnRows.reduce(
-    (n, t) => n + t.toolCallArgsChars,
-    0,
-  );
-  const totalReplyTextChars = turnRows.reduce(
-    (n, t) => n + t.replyTextChars,
-    0,
-  );
+  const totalOutputTokens = turnRows.reduce((n, t) => n + t.outputTokens, 0);
+  const totalThinkingChars = turnRows.reduce((n, t) => n + t.thinkingChars, 0);
+  const totalToolResultChars = allToolResultRows.reduce((n, r) => n + (r.result_text_len || 0), 0);
+  const totalToolCallArgsChars = turnRows.reduce((n, t) => n + t.toolCallArgsChars, 0);
+  const totalReplyTextChars = turnRows.reduce((n, t) => n + t.replyTextChars, 0);
 
-  const peakInputTokens = turnRows.reduce(
-    (m, t) => Math.max(m, t.inputTokens + t.cacheReadTokens),
-    0,
-  );
+  const peakInputTokens = turnRows.reduce((m, t) => Math.max(m, t.inputTokens + t.cacheReadTokens), 0);
   const finalInputTokens =
-    (turnRows[turnRows.length - 1]?.inputTokens || 0) +
-    (turnRows[turnRows.length - 1]?.cacheReadTokens || 0);
-  const totalInputCumulative = turnRows.reduce(
-    (n, t) => n + t.inputTokens + t.cacheReadTokens,
-    0,
-  );
-  const totalCacheReadCumulative = turnRows.reduce(
-    (n, t) => n + t.cacheReadTokens,
-    0,
-  );
+    (turnRows[turnRows.length - 1]?.inputTokens || 0) + (turnRows[turnRows.length - 1]?.cacheReadTokens || 0);
+  const totalInputCumulative = turnRows.reduce((n, t) => n + t.inputTokens + t.cacheReadTokens, 0);
+  const totalCacheReadCumulative = turnRows.reduce((n, t) => n + t.cacheReadTokens, 0);
   const cacheHitRate = totalInputCumulative > 0 ? totalCacheReadCumulative / totalInputCumulative : null;
 
   // ─── Top-N single-point spikes ────────────────────────────────
@@ -603,8 +566,7 @@ function buildTimeline(
 function buildSpikeSummary(t: ContextTimeline["turns"][number]): string {
   const tool = t.primaryTool || t.primaryToolKind || "unknown";
   const trChars = t.prevToolResultChars;
-  const trBlurb =
-    trChars > 0 ? ` — ${(trChars / 1000).toFixed(0)}k char tool_result` : "";
+  const trBlurb = trChars > 0 ? ` — ${(trChars / 1000).toFixed(0)}k char tool_result` : "";
   return `${tool}: +${t.deltaIn?.toLocaleString() ?? "?"} tokens${trBlurb}`;
 }
 
@@ -691,13 +653,12 @@ function buildPhaseNote(name: ContextPhaseName, slice: ContextTimeline["turns"])
       const biggest = slice.reduce((best, t) => ((t.deltaIn ?? 0) > (best.deltaIn ?? 0) ? t : best), slice[0]);
       const d = biggest.deltaIn ?? 0;
       const tool = biggest.primaryTool || "unknown";
-      return `+${d.toLocaleString()} via ${tool}` + (slice.length > 1 ? ` (${slice.length} spikes)` : "");
+      return `+${d.toLocaleString()} via ${tool}${slice.length > 1 ? ` (${slice.length} spikes)` : ""}`;
     }
     case "loop":
       return `${slice.length} turns, cache-hit loop, no writes`;
     case "yield_resume":
       return `cold-cache resume`;
-    case "normal":
     default:
       return `${slice.length} normal turn${slice.length === 1 ? "" : "s"}`;
   }
@@ -719,11 +680,7 @@ function detectLoopFlags(
       const isWrite = t.primaryTool === "write" || t.primaryTool === "edit";
       const total = t.totalTokens || 1;
       const drift = j > i ? Math.abs(t.totalTokens - turnRows[j - 1].totalTokens) / total : 0;
-      if (
-        cacheHit >= LOOP_CACHE_HIT_THRESHOLD &&
-        !isWrite &&
-        drift <= LOOP_TOTAL_DRIFT_THRESHOLD
-      ) {
+      if (cacheHit >= LOOP_CACHE_HIT_THRESHOLD && !isWrite && drift <= LOOP_TOTAL_DRIFT_THRESHOLD) {
         j++;
       } else {
         break;
@@ -768,10 +725,7 @@ function detectLoopFlags(
   let healthVerdict: ContextTimeline["loopFlags"]["healthVerdict"] = "healthy";
   if (suspectedLoopWindows.some((w) => w.turns >= 10)) {
     healthVerdict = "stuck";
-  } else if (
-    consecutiveNoWriteTurns >= 8 ||
-    repeatedFileReads.some((r) => r.readCount >= 4)
-  ) {
+  } else if (consecutiveNoWriteTurns >= 8 || repeatedFileReads.some((r) => r.readCount >= 4)) {
     healthVerdict = "suspect";
   }
 

@@ -13,8 +13,8 @@
  */
 
 import type { DatabaseSync } from "node:sqlite";
-import { HANDLERS, handleHelp } from "./handlers.ts";
 import { header } from "./format.ts";
+import { HANDLERS, handleHelp } from "./handlers.ts";
 
 export interface DispatchResult {
   text: string;
@@ -50,7 +50,7 @@ export function dispatch(db: DatabaseSync, argv: string[]): DispatchResult {
   if (!handler) {
     const helpText = handleHelp(db, []);
     return {
-      text: header(`unknown command: /observ ${subcommand}`) + "\n" + helpText,
+      text: `${header(`unknown command: /observ ${subcommand}`)}\n${helpText}`,
       exitCode: 1,
     };
   }
@@ -60,7 +60,7 @@ export function dispatch(db: DatabaseSync, argv: string[]): DispatchResult {
   } catch (err) {
     const msg = (err instanceof Error ? err.message : String(err)).slice(0, 200);
     return {
-      text: header(`/observ ${subcommand} failed`) + "\n" + msg,
+      text: `${header(`/observ ${subcommand} failed`)}\n${msg}`,
       exitCode: 1,
     };
   }

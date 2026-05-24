@@ -1,5 +1,5 @@
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { readFileSync } from "node:fs";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { join } from "node:path";
 import { CONFIG } from "../config.ts";
 import { getEnvValue } from "../env.ts";
@@ -21,7 +21,14 @@ function checkAuth(req: IncomingMessage, query: Record<string, string>): boolean
   const path = (req.url || "").split("?")[0];
   // Allow static assets without token (CSS/JS/HTML, healthz).
   // The frontend reads #token from the URL and sends API auth as a bearer header.
-  if (path === "/" || path === "/index.html" || path.endsWith(".css") || path.endsWith(".js") || path.startsWith("/healthz")) return true;
+  if (
+    path === "/" ||
+    path === "/index.html" ||
+    path.endsWith(".css") ||
+    path.endsWith(".js") ||
+    path.startsWith("/healthz")
+  )
+    return true;
   // API endpoints require token
   const authHeader = req.headers.authorization || "";
   if (authHeader === `Bearer ${AUTH_TOKEN}`) return true;
@@ -37,13 +44,14 @@ function send401(res: ServerResponse): void {
 h1{color:#f85149;font-size:20px}p{color:#8b949e;font-size:13px;margin-top:8px}</style></head>
 <body><div class="box"><h1>Access Denied</h1><p>Add <code>#token=YOUR_TOKEN</code> to the URL</p></div></body></html>`);
 }
-import { handleSessionsRoutes } from "./routes-sessions.ts";
-import { handleSkillsRoute } from "./routes-skills.ts";
-import { handleScriptsRoute } from "./routes-scripts.ts";
-import { handleMcpsRoute } from "./routes-mcps.ts";
-import { handleHealthRoute } from "./routes-health.ts";
+
 import { getAllRegistry } from "../storage/registry-repo.ts";
 import { getSummaryStats } from "../storage/steps-repo.ts";
+import { handleHealthRoute } from "./routes-health.ts";
+import { handleMcpsRoute } from "./routes-mcps.ts";
+import { handleScriptsRoute } from "./routes-scripts.ts";
+import { handleSessionsRoutes } from "./routes-sessions.ts";
+import { handleSkillsRoute } from "./routes-skills.ts";
 
 const FRONTEND_DIR = join(import.meta.dirname, "..", "frontend");
 
@@ -96,10 +104,18 @@ export function startServer(): void {
         return sendHtml(res, readFileSync(join(FRONTEND_DIR, "index.html"), "utf-8"));
       }
       if (path.endsWith(".css")) {
-        try { return sendCss(res, readFileSync(join(FRONTEND_DIR, path.slice(1)), "utf-8")); } catch { return send404(res); }
+        try {
+          return sendCss(res, readFileSync(join(FRONTEND_DIR, path.slice(1)), "utf-8"));
+        } catch {
+          return send404(res);
+        }
       }
       if (path.endsWith(".js")) {
-        try { return sendJs(res, readFileSync(join(FRONTEND_DIR, path.slice(1)), "utf-8")); } catch { return send404(res); }
+        try {
+          return sendJs(res, readFileSync(join(FRONTEND_DIR, path.slice(1)), "utf-8"));
+        } catch {
+          return send404(res);
+        }
       }
 
       // API routes

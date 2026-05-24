@@ -2,16 +2,18 @@
  * Hermetic tests for the deterministic Workflow Graph projection.
  */
 
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 let passed = 0;
 let failed = 0;
 const failures: string[] = [];
 function assert(cond: boolean, name: string, detail?: string) {
-  if (cond) { passed++; console.log(`  ✅ ${name}`); }
-  else {
+  if (cond) {
+    passed++;
+    console.log(`  ✅ ${name}`);
+  } else {
     failed++;
     console.log(`  ❌ ${name}${detail ? ` — ${detail}` : ""}`);
     failures.push(name);
@@ -54,24 +56,37 @@ function insertSession(key: string, sid: string, parent?: { key: string; sid: st
 }
 
 let seq = 0;
-function insertStep(sessionKey: string, runId: string, opts: {
-  id: string;
-  offset: number;
-  nodeType: string;
-  role?: string;
-  toolName?: string;
-  input?: string;
-  result?: string;
-  status?: string;
-}) {
+function insertStep(
+  sessionKey: string,
+  runId: string,
+  opts: {
+    id: string;
+    offset: number;
+    nodeType: string;
+    role?: string;
+    toolName?: string;
+    input?: string;
+    result?: string;
+    status?: string;
+  },
+) {
   db.prepare(`INSERT INTO steps
     (step_id, session_key, run_id, seq, ts, ts_epoch_ms, role, node_type,
      tool_name, status, is_stuck, is_current, input_preview, result_preview)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?)
   `).run(
-    opts.id, sessionKey, runId, seq++, iso(opts.offset), now + opts.offset,
-    opts.role || "assistant", opts.nodeType, opts.toolName || null,
-    opts.status || "ok", opts.input || null, opts.result || null,
+    opts.id,
+    sessionKey,
+    runId,
+    seq++,
+    iso(opts.offset),
+    now + opts.offset,
+    opts.role || "assistant",
+    opts.nodeType,
+    opts.toolName || null,
+    opts.status || "ok",
+    opts.input || null,
+    opts.result || null,
   );
 }
 
@@ -104,7 +119,13 @@ function seed(workStatus: string) {
     nodeType: "SUBAGENT_SPAWN",
     toolName: "sessions_spawn",
     input: '{"taskName":"source-refresh","mode":"run"}',
-    result: JSON.stringify({ accepted: true, childSessionKey: childKey, runId: childRun, taskName: "source-refresh", mode: "run" }),
+    result: JSON.stringify({
+      accepted: true,
+      childSessionKey: childKey,
+      runId: childRun,
+      taskName: "source-refresh",
+      mode: "run",
+    }),
   });
   insertStep(parentKey, parentRun, {
     id: "p-yield",
@@ -163,7 +184,7 @@ waiting_children: none
 `);
 {
   const graph = getWorkflowGraph(parentKey, parentRun);
-  const types = graph.events.map(e => e.type);
+  const types = graph.events.map((e) => e.type);
   assert(types.includes("user_message"), "user_message node created");
   assert(types.includes("skill_or_source_step"), "source/skill step node created");
   assert(types.includes("checkpoint_write"), "checkpoint write node created");
@@ -176,20 +197,44 @@ waiting_children: none
   assert(types.includes("parent_resumed"), "parent_resumed node created");
   assert(types.includes("workflow_state_snapshot"), "workflow snapshot node created");
   assert(types.includes("workflow_state_gap"), "empty child refs creates workflow_state_gap");
-  assert(graph.lanes.some(l => l.id === `child:${childKey}`), "child lane uses exact childSessionKey");
-  assert(!graph.lanes.some(l => l.id === `child:${unrelatedChildKey}`), "unspawned historical child is not pulled into current graph");
-  assert(graph.edges.some(e => e.type === "spawn"), "spawn edge emitted");
-  assert(graph.diagnostics.some(d => d.type === "workflow_state_child_refs_empty"), "workflow child reference diagnostic emitted");
+  assert(
+    graph.lanes.some((l) => l.id === `child:${childKey}`),
+    "child lane uses exact childSessionKey",
+  );
+  assert(
+    !graph.lanes.some((l) => l.id === `child:${unrelatedChildKey}`),
+    "unspawned historical child is not pulled into current graph",
+  );
+  assert(
+    graph.edges.some((e) => e.type === "spawn"),
+    "spawn edge emitted",
+  );
+  assert(
+    graph.diagnostics.some((d) => d.type === "workflow_state_child_refs_empty"),
+    "workflow child reference diagnostic emitted",
+  );
   assert(graph.validation.status === "ok", "workflow graph self-validation passes");
-  assert(graph.validation.checks.some(c => c.id === "provenance.step_id" && c.status === "ok"), "self-validation checks step provenance");
-  assert(graph.validation.checks.some(c => c.id === "scope.run_id" && c.status === "ok"), "self-validation checks run scope");
-  assert(["idle", "ok"].includes(graph.attention.status), "attention summary reports no active blocker after completed workflow");
+  assert(
+    graph.validation.checks.some((c) => c.id === "provenance.step_id" && c.status === "ok"),
+    "self-validation checks step provenance",
+  );
+  assert(
+    graph.validation.checks.some((c) => c.id === "scope.run_id" && c.status === "ok"),
+    "self-validation checks run scope",
+  );
+  assert(
+    ["idle", "ok"].includes(graph.attention.status),
+    "attention summary reports no active blocker after completed workflow",
+  );
 
-  const accepted = graph.events.find(e => e.type === "sessions_spawn_accepted");
+  const accepted = graph.events.find((e) => e.type === "sessions_spawn_accepted");
   assert(accepted?.provenance.childSessionKey === childKey, "accepted event includes childSessionKey provenance");
   assert(accepted?.provenance.child_run_id === childRun, "accepted event includes child run provenance");
-  const snapshot = graph.events.find(e => e.type === "workflow_state_snapshot");
-  assert(snapshot?.provenance.adapter_id === "openclaw-managed-workflow", "generic workflow adapter provenance emitted");
+  const snapshot = graph.events.find((e) => e.type === "workflow_state_snapshot");
+  assert(
+    snapshot?.provenance.adapter_id === "openclaw-managed-workflow",
+    "generic workflow adapter provenance emitted",
+  );
 }
 
 console.log("\n=== Group 2: workflow child binding ===");
@@ -205,10 +250,13 @@ waiting_children:
 `);
 {
   const graph = getWorkflowGraph(parentKey, parentRun);
-  const types = graph.events.map(e => e.type);
+  const types = graph.events.map((e) => e.type);
   assert(types.includes("workflow_state_child_bound"), "workflow child bound node created");
-  assert(!graph.diagnostics.some(d => d.type === "workflow_state_child_refs_empty"), "no empty-child diagnostic when exact child bound");
-  const bound = graph.events.find(e => e.type === "workflow_state_child_bound");
+  assert(
+    !graph.diagnostics.some((d) => d.type === "workflow_state_child_refs_empty"),
+    "no empty-child diagnostic when exact child bound",
+  );
+  const bound = graph.events.find((e) => e.type === "workflow_state_child_bound");
   assert(bound?.provenance.flow_id === "flow-bound", "bound event includes flow_id provenance");
 }
 
@@ -223,8 +271,14 @@ waiting_children:
   process.env.OBS_WORKFLOW_ADAPTERS = "none";
   const graph = getWorkflowGraph(parentKey, parentRun);
   delete process.env.OBS_WORKFLOW_ADAPTERS;
-  assert(!graph.events.some(e => e.type === "workflow_state_snapshot"), "disabled adapters skip managed workflow snapshot");
-  assert(graph.diagnostics.some(d => d.type === "workflow_state_unavailable"), "disabled adapters emit generic workflow-state diagnostic");
+  assert(
+    !graph.events.some((e) => e.type === "workflow_state_snapshot"),
+    "disabled adapters skip managed workflow snapshot",
+  );
+  assert(
+    graph.diagnostics.some((d) => d.type === "workflow_state_unavailable"),
+    "disabled adapters emit generic workflow-state diagnostic",
+  );
 }
 
 console.log("\n=== Group 4: self-validation catches incomplete child visibility ===");
@@ -242,9 +296,18 @@ db.prepare("DELETE FROM steps WHERE session_key = ?").run(childKey);
 {
   const graph = getWorkflowGraph(parentKey, parentRun);
   assert(graph.validation.status === "warning", "self-validation warns when accepted child has no visible steps");
-  assert(graph.validation.checks.some(c => c.id === "spawn.child_steps" && c.status === "warning"), "self-validation identifies missing child steps");
-  assert(graph.diagnostics.some(d => d.type === "validation_spawn_child_steps"), "validation warning is surfaced as diagnostic");
-  assert(["waiting", "stuck"].includes(graph.attention.status), "attention marks parent yielded without visible child return as waiting/stuck");
+  assert(
+    graph.validation.checks.some((c) => c.id === "spawn.child_steps" && c.status === "warning"),
+    "self-validation identifies missing child steps",
+  );
+  assert(
+    graph.diagnostics.some((d) => d.type === "validation_spawn_child_steps"),
+    "validation warning is surfaced as diagnostic",
+  );
+  assert(
+    ["waiting", "stuck"].includes(graph.attention.status),
+    "attention marks parent yielded without visible child return as waiting/stuck",
+  );
   assert(graph.attention.title.includes("Parent yielded"), "attention explains parent is waiting after yield");
 }
 

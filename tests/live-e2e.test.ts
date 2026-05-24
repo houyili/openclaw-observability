@@ -36,10 +36,10 @@
  *     tests/live-e2e.test.ts
  */
 
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
-import { join, basename } from "node:path";
-import { DatabaseSync } from "node:sqlite";
 import { execSync, spawnSync } from "node:child_process";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { CONFIG } from "../src/config.ts";
 import { parseTranscript, type TranscriptEntry } from "../src/ingest/transcript-parser.ts";
 import { redactKey } from "./_lib/redact.ts";
@@ -48,8 +48,10 @@ let passed = 0;
 let failed = 0;
 const failures: string[] = [];
 function assert(cond: boolean, name: string, detail?: string) {
-  if (cond) { passed++; console.log(`  ✅ ${name}`); }
-  else {
+  if (cond) {
+    passed++;
+    console.log(`  ✅ ${name}`);
+  } else {
     failed++;
     console.log(`  ❌ ${name}${detail ? ` — ${detail}` : ""}`);
     failures.push(name);
@@ -67,9 +69,9 @@ const HTTP_BASE = `http://${CONFIG.HOST}:${CONFIG.PORT}`;
 // ─── Helper: file path → session_key via the watcher's own bookkeeping ──
 
 function getWatcherFilePath(sessionKey: string): string | null {
-  const row = db.prepare(
-    "SELECT file_path FROM ingest_state WHERE session_key = ? ORDER BY updated_at DESC LIMIT 1",
-  ).get(sessionKey) as any;
+  const row = db
+    .prepare("SELECT file_path FROM ingest_state WHERE session_key = ? ORDER BY updated_at DESC LIMIT 1")
+    .get(sessionKey) as any;
   return row?.file_path || null;
 }
 
@@ -97,7 +99,11 @@ function loadTranscript(filePath: string): TranscriptEntry[] {
   const out: TranscriptEntry[] = [];
   for (const line of raw.split("\n")) {
     if (!line.trim()) continue;
-    try { out.push(JSON.parse(line)); } catch { /* skip */ }
+    try {
+      out.push(JSON.parse(line));
+    } catch {
+      /* skip */
+    }
   }
   return out;
 }
@@ -105,7 +111,8 @@ function loadTranscript(filePath: string): TranscriptEntry[] {
 // ─── Step 1+2: pick top sessions and locate their files ─────────
 console.log("\n=== Top 3 non-cron sessions by step count ===");
 
-const topSessions = db.prepare(`
+const topSessions = db
+  .prepare(`
   SELECT s.session_key, s.session_id, s.input_tokens, s.output_tokens, s.total_tokens,
          (SELECT COUNT(*) FROM steps WHERE session_key = s.session_key) as step_count
   FROM sessions s
@@ -114,7 +121,8 @@ const topSessions = db.prepare(`
     AND (SELECT COUNT(*) FROM steps WHERE session_key = s.session_key) > 0
   GROUP BY s.session_key
   ORDER BY step_count DESC LIMIT 3
-`).all() as any[];
+`)
+  .all() as any[];
 
 for (const sess of topSessions) {
   console.log(`  • ${redactKey(sess.session_key)}  (${sess.step_count} steps)`);
@@ -143,9 +151,9 @@ for (const sess of topSessions) {
     totalRunsChecked++;
 
     // Pull DB rows for this run.
-    const dbRows = db.prepare(
-      "SELECT step_id, seq, ts_epoch_ms, node_type, role, status FROM steps WHERE run_id = ? ORDER BY seq",
-    ).all(run.runId) as any[];
+    const dbRows = db
+      .prepare("SELECT step_id, seq, ts_epoch_ms, node_type, role, status FROM steps WHERE run_id = ? ORDER BY seq")
+      .all(run.runId) as any[];
 
     // For currently-actively-writing files we accept a small drift on the
     // very last run. We use mtime as the gate (matching replay-verify).
@@ -154,27 +162,26 @@ for (const sess of topSessions) {
 
     if (dbRows.length === 0 && run.steps.length > 0) {
       driftedRuns++;
-      console.log(`    DRIFT: run ${run.runId.slice(0,8)} clean=${run.steps.length} db=0`);
+      console.log(`    DRIFT: run ${run.runId.slice(0, 8)} clean=${run.steps.length} db=0`);
       continue;
     }
 
     // Step count
-    const countOk = dbRows.length === run.steps.length
-      || (isLive && Math.abs(dbRows.length - run.steps.length) <= 2);
+    const countOk = dbRows.length === run.steps.length || (isLive && Math.abs(dbRows.length - run.steps.length) <= 2);
     if (!countOk) {
       driftedRuns++;
-      console.log(`    DRIFT: run ${run.runId.slice(0,8)} clean=${run.steps.length} db=${dbRows.length}`);
+      console.log(`    DRIFT: run ${run.runId.slice(0, 8)} clean=${run.steps.length} db=${dbRows.length}`);
       continue;
     }
 
     // step_id set parity (clean ⊆ db, both within tolerance)
-    const cleanIds = new Set(run.steps.map(s => s.stepId));
-    const dbIds = new Set(dbRows.map(r => r.step_id));
+    const cleanIds = new Set(run.steps.map((s) => s.stepId));
+    const dbIds = new Set(dbRows.map((r) => r.step_id));
     let missing = 0;
     for (const id of cleanIds) if (!dbIds.has(id)) missing++;
     if (missing > 0 && !(isLive && missing <= 2)) {
       driftedRuns++;
-      console.log(`    DRIFT: run ${run.runId.slice(0,8)} ${missing} step_ids from clean parse missing in DB`);
+      console.log(`    DRIFT: run ${run.runId.slice(0, 8)} ${missing} step_ids from clean parse missing in DB`);
       continue;
     }
 
@@ -188,7 +195,9 @@ for (const sess of topSessions) {
       if (cleanFirst !== dbFirst || cleanLast !== dbLast) {
         if (!isLive) {
           driftedRuns++;
-          console.log(`    DRIFT: run ${run.runId.slice(0,8)} ts mismatch clean=[${cleanFirst},${cleanLast}] db=[${dbFirst},${dbLast}]`);
+          console.log(
+            `    DRIFT: run ${run.runId.slice(0, 8)} ts mismatch clean=[${cleanFirst},${cleanLast}] db=[${dbFirst},${dbLast}]`,
+          );
         }
       }
     }
@@ -196,18 +205,22 @@ for (const sess of topSessions) {
 }
 
 assert(totalRunsChecked > 0, "checked at least one run end-to-end");
-assert(driftedRuns === 0, "every run in every top session matches DB to step_id parity",
-  driftedRuns > 0 ? `${driftedRuns}/${totalRunsChecked} drifted` : "");
+assert(
+  driftedRuns === 0,
+  "every run in every top session matches DB to step_id parity",
+  driftedRuns > 0 ? `${driftedRuns}/${totalRunsChecked} drifted` : "",
+);
 
 // ─── Step 5: cross-check one live session against `openclaw sessions --json` ─
 console.log("\n=== One active session vs openclaw CLI ===");
 
 let cliJson: any = null;
 try {
-  const raw = execSync(
-    "openclaw sessions --all-agents --active 60 --json",
-    { encoding: "utf-8", timeout: 30_000, maxBuffer: 20 * 1024 * 1024 },
-  );
+  const raw = execSync("openclaw sessions --all-agents --active 60 --json", {
+    encoding: "utf-8",
+    timeout: 30_000,
+    maxBuffer: 20 * 1024 * 1024,
+  });
   cliJson = JSON.parse(raw);
 } catch (err) {
   console.log(`  (CLI unavailable: ${(err as Error).message?.slice(0, 100)} — skipping CLI section)`);
@@ -224,37 +237,48 @@ if (cliJson) {
     console.log("  (no non-cron active sessions in CLI output — skipping)");
   } else {
     const target = candidates[0];
-    const dbRow = db.prepare(
-      "SELECT input_tokens, output_tokens, total_tokens, updated_at FROM sessions WHERE session_key = ? AND session_id = ? LIMIT 1",
-    ).get(target.key, target.sessionId) as any;
+    const dbRow = db
+      .prepare(
+        "SELECT input_tokens, output_tokens, total_tokens, updated_at FROM sessions WHERE session_key = ? AND session_id = ? LIMIT 1",
+      )
+      .get(target.key, target.sessionId) as any;
 
-    assert(dbRow != null,
-      `obs.db has the largest active session ${redactKey(target.key)}`);
+    assert(dbRow != null, `obs.db has the largest active session ${redactKey(target.key)}`);
 
     if (dbRow) {
-      assert(dbRow.input_tokens === target.inputTokens,
+      assert(
+        dbRow.input_tokens === target.inputTokens,
         `input_tokens match for top session`,
-        `cli=${target.inputTokens} db=${dbRow.input_tokens}`);
-      assert(dbRow.output_tokens === target.outputTokens,
+        `cli=${target.inputTokens} db=${dbRow.input_tokens}`,
+      );
+      assert(
+        dbRow.output_tokens === target.outputTokens,
         `output_tokens match for top session`,
-        `cli=${target.outputTokens} db=${dbRow.output_tokens}`);
-      assert(dbRow.total_tokens === target.totalTokens,
+        `cli=${target.outputTokens} db=${dbRow.output_tokens}`,
+      );
+      assert(
+        dbRow.total_tokens === target.totalTokens,
         `total_tokens match for top session`,
-        `cli=${target.totalTokens} db=${dbRow.total_tokens}`);
+        `cli=${target.totalTokens} db=${dbRow.total_tokens}`,
+      );
 
       // Latest step in obs.db should be no more than 10 minutes older than
       // CLI's updatedAt — anything bigger means the watcher fell behind.
-      const latestStep = db.prepare(`
+      const latestStep = db
+        .prepare(`
         SELECT MAX(ts_epoch_ms) as ts FROM steps WHERE session_key = ?
-      `).get(target.key) as any;
+      `)
+        .get(target.key) as any;
       if (latestStep?.ts && target.updatedAt) {
         const lagMs = target.updatedAt - latestStep.ts;
         // Negative lag = obs.db saw newer step than CLI's reported updatedAt
         // (totally possible, the CLI is itself a snapshot). We only care
         // about being TOO STALE.
-        assert(lagMs < 10 * 60 * 1000,
+        assert(
+          lagMs < 10 * 60 * 1000,
           `obs.db latest step is within 10 min of CLI updatedAt`,
-          `lag=${Math.round(lagMs / 1000)}s`);
+          `lag=${Math.round(lagMs / 1000)}s`,
+        );
       }
     }
   }
@@ -267,7 +291,9 @@ let serviceUp = false;
 try {
   const probe = await fetch(`${HTTP_BASE}/healthz`, { signal: AbortSignal.timeout(2000) });
   serviceUp = probe.ok;
-} catch { /* not running */ }
+} catch {
+  /* not running */
+}
 
 if (!serviceUp) {
   console.log("  (service not up — skipping HTTP API checks)");
@@ -276,53 +302,56 @@ if (!serviceUp) {
   const enc = encodeURIComponent(sess.session_key);
 
   // Detail endpoint
-  const detail = await (await fetch(`${HTTP_BASE}/api/sessions/${enc}`)).json() as any;
+  const detail = (await (await fetch(`${HTTP_BASE}/api/sessions/${enc}`)).json()) as any;
   assert(detail != null, "/api/sessions/{key} returns a body");
   if (detail) {
-    assert(detail.session?.session_key === sess.session_key,
-      "detail.session.session_key matches the requested key");
-    assert(detail.session?.input_tokens === sess.input_tokens,
-      "detail.session.input_tokens matches direct SQL");
+    assert(detail.session?.session_key === sess.session_key, "detail.session.session_key matches the requested key");
+    assert(detail.session?.input_tokens === sess.input_tokens, "detail.session.input_tokens matches direct SQL");
   }
 
   // Trace endpoint — the trace's spans must round-trip to obs.db's
   // ASSISTANT-role step_ids for the same run. (toolResult rows are
   // intentionally folded into their matching toolCall in the trace view,
   // so the trace span count = assistant-row count, NOT total row count.)
-  const trace = await (await fetch(`${HTTP_BASE}/api/sessions/${enc}/trace`)).json() as any;
+  const trace = (await (await fetch(`${HTTP_BASE}/api/sessions/${enc}/trace`)).json()) as any;
   assert(trace != null, "/api/sessions/{key}/trace returns a body");
   if (trace?.spans && trace.spans.length > 0 && trace.runId) {
     const runId = trace.runId;
-    const dbAssistantCount = (db.prepare(
-      "SELECT COUNT(*) as n FROM steps WHERE run_id = ? AND role = 'assistant'",
-    ).get(runId) as any).n;
-    assert(trace.spans.length === dbAssistantCount,
+    const dbAssistantCount = (
+      db.prepare("SELECT COUNT(*) as n FROM steps WHERE run_id = ? AND role = 'assistant'").get(runId) as any
+    ).n;
+    assert(
+      trace.spans.length === dbAssistantCount,
       `trace spans count matches assistant-row count for run ${runId.slice(0, 8)}`,
-      `api=${trace.spans.length} db.assistant=${dbAssistantCount}`);
+      `api=${trace.spans.length} db.assistant=${dbAssistantCount}`,
+    );
 
     // Every span's id should exist in DB as an assistant row.
     const dbAssistantIds = new Set(
-      (db.prepare(
-        "SELECT step_id FROM steps WHERE run_id = ? AND role = 'assistant'",
-      ).all(runId) as any[]).map((r: any) => r.step_id),
+      (db.prepare("SELECT step_id FROM steps WHERE run_id = ? AND role = 'assistant'").all(runId) as any[]).map(
+        (r: any) => r.step_id,
+      ),
     );
     let unknownSpans = 0;
     for (const span of trace.spans) {
       // The trace API exposes step_id as `span.id`.
       if (!dbAssistantIds.has(span.id)) unknownSpans++;
     }
-    assert(unknownSpans === 0, "every trace span's id exists as an assistant row in DB",
-      unknownSpans > 0 ? `${unknownSpans} unknown of ${trace.spans.length}` : "");
+    assert(
+      unknownSpans === 0,
+      "every trace span's id exists as an assistant row in DB",
+      unknownSpans > 0 ? `${unknownSpans} unknown of ${trace.spans.length}` : "",
+    );
   }
 
   // Summary roundtrip
-  const summary = await (await fetch(`${HTTP_BASE}/api/summary`)).json() as any;
-  const sqlRunCount = (db.prepare(
-    "SELECT COUNT(DISTINCT run_id) as n FROM steps",
-  ).get() as any).n;
-  assert(summary.runs === sqlRunCount,
+  const summary = (await (await fetch(`${HTTP_BASE}/api/summary`)).json()) as any;
+  const sqlRunCount = (db.prepare("SELECT COUNT(DISTINCT run_id) as n FROM steps").get() as any).n;
+  assert(
+    summary.runs === sqlRunCount,
     "summary.runs matches COUNT(DISTINCT run_id) in steps",
-    `api=${summary.runs} sql=${sqlRunCount}`);
+    `api=${summary.runs} sql=${sqlRunCount}`,
+  );
 }
 
 // ─── Step 7: Round 6 — observ_cli end-to-end against the live DB ──
@@ -334,21 +363,16 @@ console.log("\n=== observ_cli status spawn against live DB ===");
   const cliPath = join(liveE2eDir, "..", "scripts", "observ_cli.ts");
   const result = spawnSync(
     process.execPath,
-    [
-      "--experimental-sqlite",
-      "--experimental-strip-types",
-      "--no-warnings",
-      cliPath,
-      "status",
-    ],
+    ["--experimental-sqlite", "--experimental-strip-types", "--no-warnings", cliPath, "status"],
     { encoding: "utf-8", timeout: 15_000 },
   );
-  assert(result.status === 0, "observ_cli status exits 0",
-    `status=${result.status} stderr=${(result.stderr || "").slice(0, 200)}`);
-  assert(result.stdout.includes("service"),
-    "observ_cli status output mentions 'service'");
-  assert(result.stdout.includes("db"),
-    "observ_cli status output mentions 'db'");
+  assert(
+    result.status === 0,
+    "observ_cli status exits 0",
+    `status=${result.status} stderr=${(result.stderr || "").slice(0, 200)}`,
+  );
+  assert(result.stdout.includes("service"), "observ_cli status output mentions 'service'");
+  assert(result.stdout.includes("db"), "observ_cli status output mentions 'db'");
 }
 
 db.close();

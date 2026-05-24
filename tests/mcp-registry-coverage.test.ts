@@ -23,16 +23,18 @@
  *     tests/mcp-registry-coverage.test.ts
  */
 
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 let passed = 0;
 let failed = 0;
 const failures: string[] = [];
 function assert(cond: boolean, name: string, detail?: string) {
-  if (cond) { passed++; console.log(`  ✅ ${name}`); }
-  else {
+  if (cond) {
+    passed++;
+    console.log(`  ✅ ${name}`);
+  } else {
     failed++;
     console.log(`  ❌ ${name}${detail ? ` — ${detail}` : ""}`);
     failures.push(name);
@@ -46,39 +48,49 @@ mkdirSync(join(tmpHome, "mcp"), { recursive: true });
 process.env.OPENCLAW_HOME = tmpHome;
 
 // openclaw.json: central config with one mcp server
-writeFileSync(join(tmpHome, "openclaw.json"), JSON.stringify({
-  agents: {},
-  mcp: {
-    servers: {
-      notion: {
-        command: "npx",
-        args: ["-y", "@notionhq/notion-mcp-server"],
-        env: { NOTION_API_KEY: "fake" },
+writeFileSync(
+  join(tmpHome, "openclaw.json"),
+  JSON.stringify({
+    agents: {},
+    mcp: {
+      servers: {
+        notion: {
+          command: "npx",
+          args: ["-y", "@notionhq/notion-mcp-server"],
+          env: { NOTION_API_KEY: "fake" },
+        },
       },
     },
-  },
-}));
+  }),
+);
 
 // mcp/research-search.json: mcporter-style file with three servers
-writeFileSync(join(tmpHome, "mcp/research-search.json"), JSON.stringify({
-  mcpServers: {
-    exa:    { baseUrl: "https://mcp.exa.ai/mcp?tools=web_search_exa" },
-    reddit: { command: "reddit-mcp-buddy" },
-    hf:     { baseUrl: "https://huggingface.co/mcp" },
-  },
-  imports: [],
-}));
+writeFileSync(
+  join(tmpHome, "mcp/research-search.json"),
+  JSON.stringify({
+    mcpServers: {
+      exa: { baseUrl: "https://mcp.exa.ai/mcp?tools=web_search_exa" },
+      reddit: { command: "reddit-mcp-buddy" },
+      hf: { baseUrl: "https://huggingface.co/mcp" },
+    },
+    imports: [],
+  }),
+);
 
 // mcp/research-search-auth.example.json: example file that must be skipped
-writeFileSync(join(tmpHome, "mcp/research-search-auth.example.json"), JSON.stringify({
-  mcpServers: {
-    "fake-auth-leak": { command: "should-not-appear" },
-  },
-}));
+writeFileSync(
+  join(tmpHome, "mcp/research-search-auth.example.json"),
+  JSON.stringify({
+    mcpServers: {
+      "fake-auth-leak": { command: "should-not-appear" },
+    },
+  }),
+);
 
 // Now safe to import obs-v2 modules
-const { scanAll, scanMcps, scanMcpFromOpenclawConfig, scanMcpFromMcpDir } =
-  await import("../src/ingest/registry-scanner.ts");
+const { scanAll, scanMcps, scanMcpFromOpenclawConfig, scanMcpFromMcpDir } = await import(
+  "../src/ingest/registry-scanner.ts"
+);
 const { upsertRegistryEntries } = await import("../src/storage/registry-repo.ts");
 const { getMcpStats } = await import("../src/storage/steps-repo.ts");
 const { getDb, closeDb } = await import("../src/storage/db.ts");
@@ -95,7 +107,7 @@ assert(central[0]?.type === "mcp", "type is mcp");
 // ─── 2. scanMcpFromMcpDir ───────────────────────────────────────
 console.log("\n=== 2. scanMcpFromMcpDir ===");
 const perTool = scanMcpFromMcpDir();
-const perToolNames = new Set(perTool.map(e => e.name));
+const perToolNames = new Set(perTool.map((e) => e.name));
 assert(perTool.length === 3, "per-tool dir yields 3 entries (example file skipped)");
 assert(perToolNames.has("exa"), "exa is present");
 assert(perToolNames.has("reddit"), "reddit is present");
@@ -105,15 +117,17 @@ assert(!perToolNames.has("fake-auth-leak"), "example file is excluded");
 // ─── 3. scanMcps dedupe ─────────────────────────────────────────
 console.log("\n=== 3. scanMcps dedupe ===");
 const all = scanMcps();
-const allNames = new Set(all.map(e => e.name));
+const allNames = new Set(all.map((e) => e.name));
 assert(all.length === 4, "scanMcps merges 1 + 3 = 4 unique names");
-assert(allNames.has("notion") && allNames.has("exa") && allNames.has("reddit") && allNames.has("hf"),
-  "all four names survive merge");
+assert(
+  allNames.has("notion") && allNames.has("exa") && allNames.has("reddit") && allNames.has("hf"),
+  "all four names survive merge",
+);
 
 // ─── 4. scanAll includes mcps ───────────────────────────────────
 console.log("\n=== 4. scanAll includes mcps ===");
 const everything = scanAll();
-const mcpsInAll = everything.filter(e => e.type === "mcp");
+const mcpsInAll = everything.filter((e) => e.type === "mcp");
 assert(mcpsInAll.length === 4, "scanAll() returns the 4 MCPs alongside skills/scripts");
 
 // ─── 5. registry + getMcpStats unused MCPs ──────────────────────
@@ -151,8 +165,7 @@ const stats2ByName = new Map(stats2.map((r: any) => [r.name, r]));
 assert(stats2.length === 4, "all 4 MCPs still listed");
 assert(stats2ByName.get("exa")?.call_count === 3, "exa.call_count = 3");
 assert(stats2ByName.get("exa")?.error_count === 1, "exa.error_count = 1");
-assert(Math.abs((stats2ByName.get("exa")?.error_rate || 0) - 1 / 3) < 1e-9,
-  "exa.error_rate ≈ 1/3");
+assert(Math.abs((stats2ByName.get("exa")?.error_rate || 0) - 1 / 3) < 1e-9, "exa.error_rate ≈ 1/3");
 assert(stats2ByName.get("notion")?.call_count === 0, "notion (unused) still call_count = 0");
 assert(stats2ByName.get("reddit")?.call_count === 0, "reddit (unused) still call_count = 0");
 
@@ -163,13 +176,15 @@ assert(firstName === "exa", "exa appears first because it has the most calls");
 // ─── 7. handleMcpsRoute mirrors the registry ────────────────────
 console.log("\n=== 7. handleMcpsRoute mirrors the registry ===");
 let httpPayload: any = null;
-const fakeSendJson = (_res: any, data: unknown) => { httpPayload = data; };
+const fakeSendJson = (_res: any, data: unknown) => {
+  httpPayload = data;
+};
 handleMcpsRoute({ range: "all" }, {} as any, fakeSendJson as any);
 
 assert(httpPayload != null, "handleMcpsRoute responded");
 assert(Array.isArray(httpPayload?.mcps), "payload has mcps array");
 assert(httpPayload?.mcps?.length === 4, "payload lists all 4 installed MCPs");
-const httpByName = new Map((httpPayload.mcps as any[]).map(m => [m.name, m]));
+const httpByName = new Map((httpPayload.mcps as any[]).map((m) => [m.name, m]));
 assert(httpByName.get("notion")?.installed === true, "notion is installed=true");
 assert(httpByName.get("notion")?.status === "active", "notion status is active");
 assert(httpByName.get("notion")?.callCount === 0, "notion callCount = 0 in payload");
@@ -188,6 +203,6 @@ closeDb();
 console.log(`\nMCP registry coverage: ${passed} passed, ${failed} failed`);
 if (failed > 0) {
   console.log("\nFailures:");
-  for (const f of failures) console.log("  - " + f);
+  for (const f of failures) console.log(`  - ${f}`);
   process.exit(1);
 }

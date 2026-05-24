@@ -2,16 +2,18 @@
  * Hermetic tests for session_id-scoped detail queries.
  */
 
-import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 let passed = 0;
 let failed = 0;
 const failures: string[] = [];
 function assert(cond: boolean, name: string, detail?: string) {
-  if (cond) { passed++; console.log(`  ✅ ${name}`); }
-  else {
+  if (cond) {
+    passed++;
+    console.log(`  ✅ ${name}`);
+  } else {
     failed++;
     console.log(`  ❌ ${name}${detail ? ` — ${detail}` : ""}`);
     failures.push(name);
@@ -73,16 +75,28 @@ db.prepare(`INSERT INTO steps
 
 {
   const missingRuns = getRunList(key, sidMissing);
-  assert(missingRuns.length === 0, "missing session_id returns no runs instead of key-level history", `got ${missingRuns.length}`);
+  assert(
+    missingRuns.length === 0,
+    "missing session_id returns no runs instead of key-level history",
+    `got ${missingRuns.length}`,
+  );
 
   const missingLatest = getLatestRun(key, sidMissing);
   assert(missingLatest === null, "missing session_id latest run is null");
 
   const missingTrace = getTraceSpans(key, undefined, sidMissing);
-  assert(missingTrace.length === 0, "missing session_id trace is empty instead of latest key-level run", `got ${missingTrace.length}`);
+  assert(
+    missingTrace.length === 0,
+    "missing session_id trace is empty instead of latest key-level run",
+    `got ${missingTrace.length}`,
+  );
 
   const legacyViaMissing = getTraceSpans(key, "run-legacy", sidMissing);
-  assert(legacyViaMissing.length === 0, "explicit runId still respects session_id boundary", `got ${legacyViaMissing.length}`);
+  assert(
+    legacyViaMissing.length === 0,
+    "explicit runId still respects session_id boundary",
+    `got ${legacyViaMissing.length}`,
+  );
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

@@ -1,7 +1,7 @@
 import type { ServerResponse } from "node:http";
-import { getDb } from "../storage/db.ts";
-import { getAuthPollStatus } from "../ingest/auth-poller.ts";
 import { CONFIG } from "../config.ts";
+import { getAuthPollStatus } from "../ingest/auth-poller.ts";
+import { getDb } from "../storage/db.ts";
 
 type SendJson = (res: ServerResponse, data: unknown, status?: number) => void;
 

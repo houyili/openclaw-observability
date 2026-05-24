@@ -1,9 +1,14 @@
 import { CONFIG } from "../config.ts";
 
 export type StepNodeType =
-  | "MODEL_THINK" | "TOOL_CALL" | "MCP_CALL"
-  | "SKILL_EXEC" | "SHELL_EXEC"
-  | "SUBAGENT_SPAWN" | "EXTERNAL_CALL" | "INTERNAL_OP"
+  | "MODEL_THINK"
+  | "TOOL_CALL"
+  | "MCP_CALL"
+  | "SKILL_EXEC"
+  | "SHELL_EXEC"
+  | "SUBAGENT_SPAWN"
+  | "EXTERNAL_CALL"
+  | "INTERNAL_OP"
   | "REPLY";
 
 export interface Classification {

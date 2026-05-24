@@ -28,7 +28,9 @@ export function checkToolResultError(contentBlocks: any[]): ErrorCheckResult {
         if (parsed.error) {
           return { isError: true, errorText: String(parsed.error).slice(0, 200) };
         }
-      } catch { /* not JSON */ }
+      } catch {
+        /* not JSON */
+      }
     }
 
     // Explicit error markers

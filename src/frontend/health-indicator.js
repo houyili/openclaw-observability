@@ -10,25 +10,23 @@
 // IMPORTANT: keep this file dependency-free and side-effect-only.
 // Anything heavier belongs in `app.js`.
 
-(function () {
+(() => {
   function computeRefreshIndicator(healthData) {
-    var poll = (healthData && healthData.authPoll) || {};
+    const poll = healthData?.authPoll || {};
     if (poll.stale) {
-      var age = poll.lastSuccessAgeMs != null
-        ? Math.round(poll.lastSuccessAgeMs / 1000) + 's'
-        : 'never';
-      var err = poll.lastError ? ' — ' + String(poll.lastError).slice(0, 60) : '';
-      return { text: '⚠ auth-poll stale (' + age + ')' + err, className: 'stale' };
+      const age = poll.lastSuccessAgeMs != null ? `${Math.round(poll.lastSuccessAgeMs / 1000)}s` : "never";
+      const err = poll.lastError ? ` — ${String(poll.lastError).slice(0, 60)}` : "";
+      return { text: `⚠ auth-poll stale (${age})${err}`, className: "stale" };
     }
-    return { text: '● auto-refresh 5s', className: '' };
+    return { text: "● auto-refresh 5s", className: "" };
   }
 
   // Browser path — `window` is defined.
-  if (typeof window !== 'undefined') {
+  if (typeof window !== "undefined") {
     window.computeRefreshIndicator = computeRefreshIndicator;
   }
   // Test path — vm.createContext exposes `globalThis` only.
-  if (typeof globalThis !== 'undefined') {
+  if (typeof globalThis !== "undefined") {
     globalThis.computeRefreshIndicator = computeRefreshIndicator;
   }
 })();

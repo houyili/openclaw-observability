@@ -2,17 +2,19 @@
  * Hermetic checks for public install/uninstall/upgrade/doctor scripts.
  */
 
-import { mkdtempSync, rmSync } from "node:fs";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 let passed = 0;
 let failed = 0;
 const failures: string[] = [];
 function assert(cond: boolean, name: string, detail?: string) {
-  if (cond) { passed++; console.log(`  ✅ ${name}`); }
-  else {
+  if (cond) {
+    passed++;
+    console.log(`  ✅ ${name}`);
+  } else {
     failed++;
     console.log(`  ❌ ${name}${detail ? ` — ${detail}` : ""}`);
     failures.push(name);
@@ -20,7 +22,16 @@ function assert(cond: boolean, name: string, detail?: string) {
 }
 
 const tmpHome = mkdtempSync(join(tmpdir(), "obs-installer-"));
-const scripts = ["common.sh", "install.sh", "uninstall.sh", "upgrade.sh", "doctor.sh", "service.sh", "tunnel.sh", "tunnel-ngrok.sh"];
+const scripts = [
+  "common.sh",
+  "install.sh",
+  "uninstall.sh",
+  "upgrade.sh",
+  "doctor.sh",
+  "service.sh",
+  "tunnel.sh",
+  "tunnel-ngrok.sh",
+];
 const baseEnv = {
   ...process.env,
   HOME: tmpHome,

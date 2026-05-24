@@ -112,14 +112,18 @@ function normalizeSeverity(value: unknown): PromptCheckSeverity {
 }
 
 function worstStatus(items: Array<{ status?: string; severity?: string }>): PromptCheckStatus {
-  if (items.some(i => i.status === "error" || i.severity === "error")) return "error";
-  if (items.some(i => i.status === "warning" || i.severity === "warning")) return "warning";
+  if (items.some((i) => i.status === "error" || i.severity === "error")) return "error";
+  if (items.some((i) => i.status === "warning" || i.severity === "warning")) return "warning";
   return "ok";
 }
 
 function parseMaybeJson(text: string | null): any | null {
   if (!text) return null;
-  try { return JSON.parse(text); } catch { return null; }
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
 }
 
 function extractSpawnAccepted(step: StepRow): SpawnAccepted | null {
@@ -171,7 +175,11 @@ function promptSourcesForRules(rules: PromptRuleConfig[]): PromptSource[] {
   return [...paths].map((p) => {
     const resolved = resolveSourcePath(p);
     let mtime: number | null = null;
-    try { mtime = statSync(resolved).mtimeMs; } catch { /* missing source is diagnostic context */ }
+    try {
+      mtime = statSync(resolved).mtimeMs;
+    } catch {
+      /* missing source is diagnostic context */
+    }
     return {
       id: createHash("sha1").update(p).digest("hex").slice(0, 12),
       kind: p === "config/prompt-rules.json" ? "rule" : "prompt",
@@ -185,11 +193,17 @@ function promptSourcesForRules(rules: PromptRuleConfig[]): PromptSource[] {
 }
 
 function hasCheckpointBefore(steps: StepRow[], tsEpochMs: number): StepRow | undefined {
-  return steps.find(s => s.ts_epoch_ms <= tsEpochMs && /(checkpoint|work_status\.md|source_collection)/i.test(`${s.tool_name || ""} ${s.input_preview || ""} ${s.result_preview || ""}`));
+  return steps.find(
+    (s) =>
+      s.ts_epoch_ms <= tsEpochMs &&
+      /(checkpoint|work_status\.md|source_collection)/i.test(
+        `${s.tool_name || ""} ${s.input_preview || ""} ${s.result_preview || ""}`,
+      ),
+  );
 }
 
 function firstSourceOp(steps: StepRow[]): StepRow | undefined {
-  return steps.find(s => {
+  return steps.find((s) => {
     const text = `${s.tool_name || ""} ${s.input_preview || ""}`;
     if (/SKILL\.md/.test(text)) return false;
     return /(research_query|url_router|arxiv|source|manifest_query|related_work|code_audit)/i.test(text);
@@ -197,10 +211,18 @@ function firstSourceOp(steps: StepRow[]): StepRow | undefined {
 }
 
 function sourceSkillReadBefore(steps: StepRow[], tsEpochMs: number): StepRow | undefined {
-  return steps.find(s => s.ts_epoch_ms <= tsEpochMs && s.tool_name === "read" && /SKILL\.md/.test(s.input_preview || ""));
+  return steps.find(
+    (s) => s.ts_epoch_ms <= tsEpochMs && s.tool_name === "read" && /SKILL\.md/.test(s.input_preview || ""),
+  );
 }
 
-function addRuleResult(results: PromptRuleResult[], rule: PromptRuleConfig, status: PromptCheckStatus, message: string, evidenceStepIds: string[] = []) {
+function addRuleResult(
+  results: PromptRuleResult[],
+  rule: PromptRuleConfig,
+  status: PromptCheckStatus,
+  message: string,
+  evidenceStepIds: string[] = [],
+) {
   results.push({
     ruleId: rule.ruleId,
     title: rule.title,
@@ -212,11 +234,16 @@ function addRuleResult(results: PromptRuleResult[], rule: PromptRuleConfig, stat
   });
 }
 
-function evaluateRules(rules: PromptRuleConfig[], steps: StepRow[], sessionId: string | null, activeRunId: string | null): PromptRuleResult[] {
+function evaluateRules(
+  rules: PromptRuleConfig[],
+  steps: StepRow[],
+  sessionId: string | null,
+  activeRunId: string | null,
+): PromptRuleResult[] {
   const db = getDb();
   const results: PromptRuleResult[] = [];
-  const spawnSteps = steps.filter(s => s.tool_name === "sessions_spawn" || s.node_type === "SUBAGENT_SPAWN");
-  const accepted = spawnSteps.map(s => ({ step: s, accepted: extractSpawnAccepted(s) }));
+  const spawnSteps = steps.filter((s) => s.tool_name === "sessions_spawn" || s.node_type === "SUBAGENT_SPAWN");
+  const accepted = spawnSteps.map((s) => ({ step: s, accepted: extractSpawnAccepted(s) }));
   const agentId = steps[0]?.session_key?.split(":")[1] || "";
 
   for (const rule of rules) {
@@ -228,19 +255,33 @@ function evaluateRules(rules: PromptRuleConfig[], steps: StepRow[], sessionId: s
         addRuleResult(results, rule, "ok", "No source operation in this run.");
       } else {
         const read = sourceSkillReadBefore(steps, source.ts_epoch_ms);
-        addRuleResult(results, rule, read ? "ok" : "warning", read ? "Source skill was read before source operations." : (rule.failureMessage || "Missing source skill read."), read ? [read.step_id, source.step_id] : [source.step_id]);
+        addRuleResult(
+          results,
+          rule,
+          read ? "ok" : "warning",
+          read
+            ? "Source skill was read before source operations."
+            : rule.failureMessage || "Missing source skill read.",
+          read ? [read.step_id, source.step_id] : [source.step_id],
+        );
       }
       continue;
     }
 
     if (rule.ruleId === "checkpoint_before_sessions_yield") {
-      const yields = steps.filter(s => s.tool_name === "sessions_yield");
+      const yields = steps.filter((s) => s.tool_name === "sessions_yield");
       if (yields.length === 0) {
         addRuleResult(results, rule, "ok", "No sessions_yield in this run.");
       } else {
-        const bad = yields.find(y => !hasCheckpointBefore(steps, y.ts_epoch_ms));
-        const good = yields.find(y => hasCheckpointBefore(steps, y.ts_epoch_ms));
-        addRuleResult(results, rule, bad ? "warning" : "ok", bad ? (rule.failureMessage || "Missing checkpoint before yield.") : "Checkpoint exists before sessions_yield.", bad ? [bad.step_id] : [good?.step_id].filter(Boolean) as string[]);
+        const bad = yields.find((y) => !hasCheckpointBefore(steps, y.ts_epoch_ms));
+        const good = yields.find((y) => hasCheckpointBefore(steps, y.ts_epoch_ms));
+        addRuleResult(
+          results,
+          rule,
+          bad ? "warning" : "ok",
+          bad ? rule.failureMessage || "Missing checkpoint before yield." : "Checkpoint exists before sessions_yield.",
+          bad ? [bad.step_id] : ([good?.step_id].filter(Boolean) as string[]),
+        );
       }
       continue;
     }
@@ -249,20 +290,36 @@ function evaluateRules(rules: PromptRuleConfig[], steps: StepRow[], sessionId: s
       if (spawnSteps.length === 0) {
         addRuleResult(results, rule, "ok", "No sessions_spawn in this run.");
       } else {
-        const bad = accepted.find(x => !x.accepted?.childSessionKey || !x.accepted?.runId);
-        addRuleResult(results, rule, bad ? "warning" : "ok", bad ? (rule.failureMessage || "Spawn result missing child key or run id.") : "All spawn results expose childSessionKey and runId.", bad ? [bad.step.step_id] : spawnSteps.map(s => s.step_id));
+        const bad = accepted.find((x) => !x.accepted?.childSessionKey || !x.accepted?.runId);
+        addRuleResult(
+          results,
+          rule,
+          bad ? "warning" : "ok",
+          bad
+            ? rule.failureMessage || "Spawn result missing child key or run id."
+            : "All spawn results expose childSessionKey and runId.",
+          bad ? [bad.step.step_id] : spawnSteps.map((s) => s.step_id),
+        );
       }
       continue;
     }
 
     if (rule.ruleId === "accepted_child_should_be_visible") {
-      const visibleBad = accepted.find(x => {
+      const visibleBad = accepted.find((x) => {
         if (!x.accepted?.childSessionKey || !x.accepted?.runId) return false;
         const childKey = baseKey(x.accepted.childSessionKey);
-        const row = db.prepare("SELECT 1 FROM steps WHERE session_key = ? AND run_id = ? LIMIT 1").get(childKey, x.accepted.runId) as any;
+        const row = db
+          .prepare("SELECT 1 FROM steps WHERE session_key = ? AND run_id = ? LIMIT 1")
+          .get(childKey, x.accepted.runId) as any;
         return !row;
       });
-      addRuleResult(results, rule, visibleBad ? "warning" : "ok", visibleBad ? (rule.failureMessage || "Accepted child is not visible.") : "Accepted child sessions are visible.", visibleBad ? [visibleBad.step.step_id] : spawnSteps.map(s => s.step_id));
+      addRuleResult(
+        results,
+        rule,
+        visibleBad ? "warning" : "ok",
+        visibleBad ? rule.failureMessage || "Accepted child is not visible." : "Accepted child sessions are visible.",
+        visibleBad ? [visibleBad.step.step_id] : spawnSteps.map((s) => s.step_id),
+      );
       continue;
     }
 
@@ -271,10 +328,20 @@ function evaluateRules(rules: PromptRuleConfig[], steps: StepRow[], sessionId: s
         addRuleResult(results, rule, "ok", "No accepted child requiring workflow state.");
       } else {
         const graph = getWorkflowGraph(steps[0]?.session_key || "", activeRunId || undefined, sessionId);
-        const types = new Set(graph.events.map(e => e.type));
-        const hasGapDiagnostic = graph.diagnostics.some(d => d.type === "workflow_state_unavailable" || d.type === "workflow_state_child_refs_empty");
+        const types = new Set(graph.events.map((e) => e.type));
+        const hasGapDiagnostic = graph.diagnostics.some(
+          (d) => d.type === "workflow_state_unavailable" || d.type === "workflow_state_child_refs_empty",
+        );
         const ok = types.has("workflow_state_child_bound") || types.has("workflow_state_gap") || hasGapDiagnostic;
-        addRuleResult(results, rule, ok ? "ok" : "warning", ok ? "Workflow state is bound or an explicit gap is visible." : (rule.failureMessage || "Workflow state has no binding or gap."), spawnSteps.map(s => s.step_id));
+        addRuleResult(
+          results,
+          rule,
+          ok ? "ok" : "warning",
+          ok
+            ? "Workflow state is bound or an explicit gap is visible."
+            : rule.failureMessage || "Workflow state has no binding or gap.",
+          spawnSteps.map((s) => s.step_id),
+        );
       }
       continue;
     }
@@ -334,11 +401,13 @@ export function getPromptCheck(sessionKey: string, runId?: string, sessionId?: s
   const parentKey = baseKey(sessionKey);
   const activeRunId = runId || (getRunList(parentKey, sessionId)[0]?.run_id ?? null);
   const rows = activeRunId
-    ? db.prepare(`
+    ? (db
+        .prepare(`
         SELECT * FROM steps
         WHERE ${sessionId ? "session_id = ?" : "session_key = ?"} AND run_id = ?
         ORDER BY seq
-      `).all(sessionId || parentKey, activeRunId) as StepRow[]
+      `)
+        .all(sessionId || parentKey, activeRunId) as unknown as StepRow[])
     : [];
   const rules = loadPromptRules();
   const ruleResults = evaluateRules(rules, rows, sessionId || null, activeRunId);
@@ -357,7 +426,7 @@ export function getPromptCheck(sessionKey: string, runId?: string, sessionId?: s
     };
   });
   const diagnostics = diagnosticsForRulesAndHooks(ruleResults, hooks);
-  const runs = getRunList(parentKey, sessionId).map(r => ({
+  const runs = getRunList(parentKey, sessionId).map((r) => ({
     runId: r.run_id,
     startedAt: r.started_at,
     durationMs: r.duration_ms,

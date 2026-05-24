@@ -17,8 +17,8 @@
  *     tests/perf-bench.ts
  */
 
-import { recomputeAllSessionOps, recomputeAllSessionCounts } from "../src/storage/sessions-repo.ts";
-import { getSkillStats, getScriptStats, getMcpStats, getSummaryStats } from "../src/storage/steps-repo.ts";
+import { recomputeAllSessionCounts, recomputeAllSessionOps } from "../src/storage/sessions-repo.ts";
+import { getMcpStats, getScriptStats, getSkillStats, getSummaryStats } from "../src/storage/steps-repo.ts";
 
 const BUDGETS: Record<string, number> = {
   recomputeAllSessionOps: 250,
@@ -29,7 +29,13 @@ const BUDGETS: Record<string, number> = {
   getSummaryStats: 200,
 };
 
-interface Result { name: string; wallMs: number; cpuMs: number; budget: number; ok: boolean; }
+interface Result {
+  name: string;
+  wallMs: number;
+  cpuMs: number;
+  budget: number;
+  ok: boolean;
+}
 
 function bench(name: string, fn: () => unknown): Result {
   const wallStart = process.hrtime.bigint();
@@ -65,7 +71,7 @@ for (const r of results) {
   );
 }
 
-const failed = results.filter(r => !r.ok);
+const failed = results.filter((r) => !r.ok);
 if (failed.length > 0) {
   console.log(`\n  RESULT: FAIL — ${failed.length}/${results.length} over budget`);
   process.exit(1);

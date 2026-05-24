@@ -1,6 +1,6 @@
 import { CONFIG } from "../config.ts";
-import { classifyTool, type StepNodeType, type Classification } from "./tool-classifier.ts";
-import { classifyError, checkToolResultError } from "./error-classifier.ts";
+import { checkToolResultError, classifyError } from "./error-classifier.ts";
+import { type Classification, classifyTool, type StepNodeType } from "./tool-classifier.ts";
 
 // ─── Public types ───────────────────────────────────────────────
 
@@ -51,10 +51,10 @@ export interface ParsedStep {
   // Round 6 — fine-grained Context Length view fields. Set on
   // MODEL_THINK and REPLY rows (the assistant rows that carry a `usage`
   // block); NULL on tool_call and toolResult rows.
-  inputTokens?: number;       // usage.input
-  cacheReadTokens?: number;   // usage.cacheRead
-  thinkingTextLen?: number;   // chars in content[].type='thinking' on this assistant
-  replyTextLen?: number;      // chars in content[].type='text' on REPLY rows only
+  inputTokens?: number; // usage.input
+  cacheReadTokens?: number; // usage.cacheRead
+  thinkingTextLen?: number; // chars in content[].type='thinking' on this assistant
+  replyTextLen?: number; // chars in content[].type='text' on REPLY rows only
   inputTextLen?: number;
   resultTextLen?: number;
   contextTokenDelta?: number;
@@ -187,7 +187,8 @@ function parseAssistantContent(
     const cls: Classification = classifyTool(tn, inp);
 
     // Approximate token cost: assistant message's usage.output divided among tool calls
-    const perToolTokens = (msg.usage && toolCalls.length > 0) ? Math.round(msg.usage.output / toolCalls.length) : undefined;
+    const perToolTokens =
+      msg.usage && toolCalls.length > 0 ? Math.round(msg.usage.output / toolCalls.length) : undefined;
 
     steps.push({
       stepId: `${entry.id}:${tcId}`,
@@ -218,7 +219,7 @@ function parseAssistantContent(
   if (hasText && toolCalls.length === 0) {
     const textBlock = content.find((c: any) => c.type === "text");
     steps.push({
-      stepId: entry.id + ":reply",
+      stepId: `${entry.id}:reply`,
       parentStepId: entry.parentId,
       seq: startSeq + steps.length,
       ts: entry.timestamp,
@@ -236,7 +237,7 @@ function parseAssistantContent(
       // double-count the same chars in cumulative sums.
       inputTokens: usageInputTokens,
       cacheReadTokens: usageCacheReadTokens,
-      thinkingTextLen: hasThinking ? undefined : (thinkingTextLen || undefined),
+      thinkingTextLen: hasThinking ? undefined : thinkingTextLen || undefined,
       replyTextLen: replyTextLen || undefined,
       resultPreview: textBlock?.text?.slice(0, 200),
       status: "ok",
@@ -252,11 +253,13 @@ function parseToolResult(entry: TranscriptEntry, msg: TranscriptMessage, seq: nu
   const content = msg.content;
   const errCheck = checkToolResultError(Array.isArray(content) ? content : []);
   const resultText = Array.isArray(content)
-    ? content.filter((c: any) => c.type === "text").map((c: any) => c.text || "").join("").slice(0, 200)
+    ? content
+        .filter((c: any) => c.type === "text")
+        .map((c: any) => c.text || "")
+        .join("")
+        .slice(0, 200)
     : "";
-  const resultLen = Array.isArray(content)
-    ? content.reduce((n: number, c: any) => n + (c.text?.length || 0), 0)
-    : 0;
+  const resultLen = Array.isArray(content) ? content.reduce((n: number, c: any) => n + (c.text?.length || 0), 0) : 0;
   const tsMs = new Date(entry.timestamp).getTime();
 
   return {
@@ -312,7 +315,7 @@ function finalizeRun(run: ParsedRun): ParsedRun {
 
     // Update prevEntryTs when we move to a new transcript entry
     // (MODEL_THINK and its child tool calls share ts, so only advance on toolResult or new assistant)
-    if (step.role === "toolResult" || (step.nodeType === "MODEL_THINK") || step.nodeType === "REPLY") {
+    if (step.role === "toolResult" || step.nodeType === "MODEL_THINK" || step.nodeType === "REPLY") {
       prevEntryTs = step.tsEpochMs;
     }
 
@@ -354,7 +357,8 @@ function finalizeRun(run: ParsedRun): ParsedRun {
 
 function buildInputPreview(toolName: string, input: Record<string, unknown>): string {
   if (toolName === "exec" && input.command) return String(input.command).slice(0, 200);
-  if (toolName === "read" && (input.file_path || input.path)) return String(input.file_path || input.path).slice(0, 200);
+  if (toolName === "read" && (input.file_path || input.path))
+    return String(input.file_path || input.path).slice(0, 200);
   if (toolName === "write" && input.file_path) return String(input.file_path).slice(0, 200);
   if (toolName === "edit" && input.file_path) return String(input.file_path).slice(0, 200);
   if (input.query) return String(input.query).slice(0, 200);

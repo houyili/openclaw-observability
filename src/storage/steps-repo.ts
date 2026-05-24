@@ -1,6 +1,6 @@
-import { getDb } from "./db.ts";
 import { CONFIG } from "../config.ts";
-import type { ParsedStep, ParsedRun } from "../ingest/transcript-parser.ts";
+import type { ParsedRun } from "../ingest/transcript-parser.ts";
+import { getDb } from "./db.ts";
 
 export function upsertSteps(run: ParsedRun): void {
   const db = getDb();
@@ -27,16 +27,39 @@ export function upsertSteps(run: ParsedRun): void {
 
   for (const s of run.steps) {
     stmt.run(
-      s.stepId, run.sessionKey, run.sessionId || null, run.runId, s.parentStepId, s.seq, s.ts, s.tsEpochMs,
-      s.role, s.nodeType, s.toolName || null, s.toolCallId || null,
-      s.skillName || null, s.scriptName || null, s.mcpServer || null, s.mcpTool || null,
-      s.durationMs ?? null, s.totalTokens ?? null, s.outputTokens ?? null,
-      s.inputTextLen ?? null, s.resultTextLen ?? null, s.contextTokenDelta ?? null,
-      s.status, s.errorText || null, s.errorType || null,
-      s.isStuck ? 1 : 0, s.isCurrent ? 1 : 0,
-      s.inputPreview || null, s.resultPreview || null,
-      s.inputTokens ?? null, s.cacheReadTokens ?? null,
-      s.thinkingTextLen ?? null, s.replyTextLen ?? null,
+      s.stepId,
+      run.sessionKey,
+      run.sessionId || null,
+      run.runId,
+      s.parentStepId,
+      s.seq,
+      s.ts,
+      s.tsEpochMs,
+      s.role,
+      s.nodeType,
+      s.toolName || null,
+      s.toolCallId || null,
+      s.skillName || null,
+      s.scriptName || null,
+      s.mcpServer || null,
+      s.mcpTool || null,
+      s.durationMs ?? null,
+      s.totalTokens ?? null,
+      s.outputTokens ?? null,
+      s.inputTextLen ?? null,
+      s.resultTextLen ?? null,
+      s.contextTokenDelta ?? null,
+      s.status,
+      s.errorText || null,
+      s.errorType || null,
+      s.isStuck ? 1 : 0,
+      s.isCurrent ? 1 : 0,
+      s.inputPreview || null,
+      s.resultPreview || null,
+      s.inputTokens ?? null,
+      s.cacheReadTokens ?? null,
+      s.thinkingTextLen ?? null,
+      s.replyTextLen ?? null,
     );
   }
 }
@@ -86,7 +109,7 @@ export function getRunList(sessionKey: string, sessionId?: string | null): Lates
     GROUP BY run_id
     ORDER BY MIN(ts_epoch_ms) DESC
   `;
-  const rows = db.prepare(sql).all(sessionId || baseKey) as LatestRunInfo[];
+  const rows = db.prepare(sql).all(sessionId || baseKey) as unknown as LatestRunInfo[];
   return rows;
 }
 
@@ -104,10 +127,12 @@ export function getTraceSpans(sessionKey: string, runId?: string, sessionId?: st
     params = [keyValue, runId];
   } else {
     // Get latest run's steps
-    const latestRunId = db.prepare(`
+    const latestRunId = db
+      .prepare(`
       SELECT run_id FROM steps WHERE ${keyCol} = ?
       GROUP BY run_id ORDER BY MIN(ts_epoch_ms) DESC LIMIT 1
-    `).get(keyValue) as any;
+    `)
+      .get(keyValue) as any;
     if (!latestRunId) return [];
     sql = `SELECT * FROM steps WHERE ${keyCol} = ? AND run_id = ? ORDER BY seq`;
     params = [keyValue, latestRunId.run_id];
@@ -120,16 +145,18 @@ export function getActivityBars(sessionKey: string, sessionId?: string | null): 
   const db = getDb();
   sessionKey = toBaseKey(sessionKey);
   const now = Date.now();
-  const buckets = CONFIG.ACTIVITY_BAR_BUCKETS;        // 60
+  const buckets = CONFIG.ACTIVITY_BAR_BUCKETS; // 60
   const windowMs = CONFIG.ACTIVITY_BAR_MINUTES * 60_000; // 240 min = 4h
-  const bucketMs = windowMs / buckets;                 // 4 min per bucket
+  const bucketMs = windowMs / buckets; // 4 min per bucket
   const startMs = now - windowMs;
 
-  const rows = db.prepare(`
+  const rows = db
+    .prepare(`
     SELECT ts_epoch_ms, status, is_stuck FROM steps
     WHERE ${sessionId ? "session_id" : "session_key"} = ? AND ts_epoch_ms >= ?
     ORDER BY ts_epoch_ms
-  `).all(sessionId || sessionKey, startMs) as any[];
+  `)
+    .all(sessionId || sessionKey, startMs) as any[];
 
   const bars = new Array(buckets).fill(0); // 0=idle
   for (const row of rows) {
@@ -211,7 +238,10 @@ export function getSkillStats(range: string, q?: string) {
     WHERE r.type = 'skill'
   `;
   const params: any[] = [since];
-  if (q) { sql += " AND r.name LIKE ?"; params.push(`%${q}%`); }
+  if (q) {
+    sql += " AND r.name LIKE ?";
+    params.push(`%${q}%`);
+  }
   sql += " GROUP BY r.name, r.path ORDER BY call_count DESC";
   const rows = db.prepare(sql).all(...params) as any[];
 
@@ -236,7 +266,10 @@ export function getScriptStats(range: string, q?: string) {
     WHERE r.type = 'script'
   `;
   const params: any[] = [since];
-  if (q) { sql += " AND r.name LIKE ?"; params.push(`%${q}%`); }
+  if (q) {
+    sql += " AND r.name LIKE ?";
+    params.push(`%${q}%`);
+  }
   sql += " GROUP BY r.name, r.path ORDER BY call_count DESC";
   const rows = db.prepare(sql).all(...params) as any[];
 
@@ -285,7 +318,10 @@ export function getMcpStats(range: string, q?: string) {
     WHERE r.type = 'mcp'
   `;
   const params: any[] = [since];
-  if (q) { sql += " AND r.name LIKE ?"; params.push(`%${q}%`); }
+  if (q) {
+    sql += " AND r.name LIKE ?";
+    params.push(`%${q}%`);
+  }
   // Order by call_count DESC then name so installed-but-unused MCPs
   // group together alphabetically at the bottom of the list.
   sql += " GROUP BY r.name, r.status, r.path ORDER BY call_count DESC, r.name ASC";
@@ -302,19 +338,32 @@ export function getMcpStats(range: string, q?: string) {
 
 export function getMcpErrorTypeRanking(range: string) {
   const since = rangeToEpoch(range);
-  return getDb().prepare(`
+  return getDb()
+    .prepare(`
     SELECT error_type as type, COUNT(*) as count
     FROM steps WHERE node_type = 'MCP_CALL' AND status = 'error' AND ts_epoch_ms >= ?
     GROUP BY error_type ORDER BY count DESC LIMIT 10
-  `).all(since);
+  `)
+    .all(since);
 }
 
-function buildRankings(rows: any[], field: string) {
-  const sorted = [...rows].filter(r => r.call_count > 0);
+function buildRankings(rows: any[], _field: string) {
+  const sorted = [...rows].filter((r) => r.call_count > 0);
   return {
-    topUsed: sorted.sort((a, b) => b.call_count - a.call_count).slice(0, 10).map(r => ({ name: r.name, count: r.call_count })),
-    topErrors: sorted.filter(r => r.error_count > 0).sort((a, b) => b.error_count - a.error_count).slice(0, 10).map(r => ({ name: r.name, count: r.error_count })),
-    topStuck: sorted.filter(r => r.stuck_count > 0).sort((a, b) => b.stuck_count - a.stuck_count).slice(0, 10).map(r => ({ name: r.name, count: r.stuck_count })),
+    topUsed: sorted
+      .sort((a, b) => b.call_count - a.call_count)
+      .slice(0, 10)
+      .map((r) => ({ name: r.name, count: r.call_count })),
+    topErrors: sorted
+      .filter((r) => r.error_count > 0)
+      .sort((a, b) => b.error_count - a.error_count)
+      .slice(0, 10)
+      .map((r) => ({ name: r.name, count: r.error_count })),
+    topStuck: sorted
+      .filter((r) => r.stuck_count > 0)
+      .sort((a, b) => b.stuck_count - a.stuck_count)
+      .slice(0, 10)
+      .map((r) => ({ name: r.name, count: r.stuck_count })),
   };
 }
 
@@ -324,21 +373,30 @@ export { buildRankings };
 
 export function getSummaryStats() {
   const db = getDb();
-  const runs = db.prepare(`
+  const runs = db
+    .prepare(`
     SELECT run_id, session_key, MIN(ts_epoch_ms) as start_ms, MAX(ts_epoch_ms) as end_ms,
       CASE WHEN SUM(is_current) > 0 THEN 'running' ELSE 'completed' END as status,
       SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) as errors
     FROM steps GROUP BY run_id
-  `).all() as any[];
+  `)
+    .all() as any[];
 
-  const completed = runs.filter(r => r.status === "completed");
-  const failed = completed.filter(r => r.errors > 0);
-  const running = runs.filter(r => r.status === "running");
-  const durations = completed.map(r => r.end_ms - r.start_ms).filter(d => d > 0).sort((a, b) => a - b);
+  const completed = runs.filter((r) => r.status === "completed");
+  const failed = completed.filter((r) => r.errors > 0);
+  const running = runs.filter((r) => r.status === "running");
+  const durations = completed
+    .map((r) => r.end_ms - r.start_ms)
+    .filter((d) => d > 0)
+    .sort((a, b) => a - b);
   const avgDur = durations.length > 0 ? durations.reduce((a, b) => a + b, 0) / durations.length : 0;
   const p95Dur = durations.length > 0 ? durations[Math.floor(durations.length * 0.95)] : 0;
 
-  const toolCount = (db.prepare("SELECT COUNT(*) as n FROM steps WHERE role = 'assistant' AND node_type NOT IN ('MODEL_THINK','REPLY')").get() as any).n;
+  const toolCount = (
+    db
+      .prepare("SELECT COUNT(*) as n FROM steps WHERE role = 'assistant' AND node_type NOT IN ('MODEL_THINK','REPLY')")
+      .get() as any
+  ).n;
   const toolErrors = (db.prepare("SELECT COUNT(*) as n FROM steps WHERE status = 'error'").get() as any).n;
   const subagents = (db.prepare("SELECT COUNT(*) as n FROM steps WHERE node_type = 'SUBAGENT_SPAWN'").get() as any).n;
   const stalled = (db.prepare("SELECT COUNT(*) as n FROM steps WHERE is_stuck = 1").get() as any).n;

@@ -1,5 +1,5 @@
 import type { ServerResponse } from "node:http";
-import { getSkillStats, buildRankings } from "../storage/steps-repo.ts";
+import { buildRankings, getSkillStats } from "../storage/steps-repo.ts";
 
 type SendJson = (res: ServerResponse, data: unknown, status?: number) => void;
 

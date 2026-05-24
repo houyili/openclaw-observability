@@ -14,8 +14,10 @@ let passed = 0;
 let failed = 0;
 const failures: string[] = [];
 function assert(cond: boolean, name: string, detail?: string) {
-  if (cond) { passed++; console.log(`  ✅ ${name}`); }
-  else {
+  if (cond) {
+    passed++;
+    console.log(`  ✅ ${name}`);
+  } else {
     failed++;
     console.log(`  ❌ ${name}${detail ? ` — ${detail}` : ""}`);
     failures.push(name);
@@ -24,10 +26,7 @@ function assert(cond: boolean, name: string, detail?: string) {
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(__dirname, "..");
-const scanRoots = [
-  join(repoRoot, "tests"),
-  join(repoRoot, "config"),
-].filter(existsSync);
+const scanRoots = [join(repoRoot, "tests"), join(repoRoot, "config")].filter(existsSync);
 
 const textExt = new Set([".ts", ".js", ".json", ".jsonl", ".md", ".sh", ".txt"]);
 function ext(path: string): string {
@@ -49,7 +48,7 @@ function walk(dir: string): string[] {
 
 const banned = [
   { name: "company/user slug", re: new RegExp("byte" + "dance", "i") },
-  { name: "macOS personal home path", re: new RegExp("\\/Users\\/[^\\s\"'`]+") },
+  { name: "macOS personal home path", re: new RegExp("\\\\/Users\\\\/[^\\s\"'`]+") },
   { name: "live workspace artifact path", re: new RegExp("Documents\\/workspace|openclaw_" + "research" + "er", "i") },
   { name: "real-looking chat open id", re: new RegExp("\\bo" + "u_[a-z0-9]{3,}", "i") },
   { name: "live private agent key", re: new RegExp("agent:" + "research" + "er", "i") },

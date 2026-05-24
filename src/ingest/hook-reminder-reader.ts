@@ -54,7 +54,11 @@ export function ingestHookReminderFile(filePath = CONFIG.HOOK_REMINDERS_FILE): n
     lineNo++;
     if (!line.trim()) continue;
     let parsed: any;
-    try { parsed = JSON.parse(line); } catch { continue; }
+    try {
+      parsed = JSON.parse(line);
+    } catch {
+      continue;
+    }
     if (!parsed || typeof parsed !== "object") continue;
     const ts = typeof parsed.ts === "string" ? parsed.ts : "";
     const hookId = typeof parsed.hookId === "string" ? parsed.hookId : "";
@@ -89,8 +93,12 @@ export function startHookReminderWatcher(filePath = CONFIG.HOOK_REMINDERS_FILE):
 
   function tick(): void {
     if (!running || !existsSync(filePath)) return;
-    let stat;
-    try { stat = statSync(filePath); } catch { return; }
+    let stat: ReturnType<typeof statSync>;
+    try {
+      stat = statSync(filePath);
+    } catch {
+      return;
+    }
     if (stat.size === lastSize && stat.mtimeMs === lastMtime) return;
     lastSize = stat.size;
     lastMtime = stat.mtimeMs;
