@@ -2,6 +2,46 @@
 
 ## Unreleased
 
+## 0.1.4 - 2026-05-24
+
+Hotfix for a regression introduced in Round 7 (when the `sessions` PK
+widened from `(session_key)` to `(session_key, session_id)` for
+parent-child lineage support). The main table now folds by
+`session_key` again, restoring the constitution §1.2 "one row per
+session" semantic. At realistic data scale (~3800 sessions, single
+chat producing 78 distinct session_id refreshes in a month) the
+pre-fix dashboard's first page could be entirely occupied by 15
+rows that all shared one `session_key`, hiding every other agent.
+
+### Fixed
+
+- `getAllSessions` now uses a window-function fold:
+  `ROW_NUMBER() OVER (PARTITION BY session_key ORDER BY updated_at
+  DESC, session_id DESC) = 1` returns the latest row per
+  `session_key`. Total count switches to
+  `COUNT(DISTINCT session_key)`. Pagination is over distinct keys.
+- A new `session_id_count` field on every row reports how many
+  sibling `session_id` rows share this key, so the frontend can
+  expose an "[+ N more]" expand affordance (UI rendering deferred
+  to v0.1.5).
+- `getSession(key)` is similarly hardened: now `ORDER BY
+  updated_at DESC, session_id DESC LIMIT 1` instead of returning an
+  arbitrary row.
+- `/api/sessions` response includes `sessionIdCount` per row.
+
+### Verified
+
+- 23/23 hermetic suites pass (`cli-commands`, `parent-child`,
+  `session-id-scope`, `mcp-registry-coverage` etc. all unaffected).
+- Live `integrity` (110/110) and `live-e2e` step-id-parity
+  assertion still pass with no new drift; the pre-existing 2-row
+  orphan drift from Round 10's audit (A1) is unrelated and still
+  outstanding.
+- Manual verification on live obs.db: total distinct keys went
+  from 417 rows to 230 keys; first page now mixes researcher
+  (14/15) + main (1/15) rows, with `sessionIdCount=78` on the
+  most-active researcher key surfacing the fold count.
+
 ## 0.1.3 - 2026-05-25
 
 This release is the v0.1.x "open source polish wave". It hardens the

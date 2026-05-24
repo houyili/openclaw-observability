@@ -429,6 +429,10 @@ export interface SessionRow {
   token_source: string | null;
   parent_session_key: string | null;
   parent_session_id: string | null;
+  // Number of distinct session_id rows that share this session_key.
+  // Always >= 1. Added by getAllSessions (the main-table query that
+  // folds by session_key). NOT populated by getSession.
+  session_id_count?: number;
 }
 
 export interface SessionListResult {
@@ -452,68 +456,93 @@ export function getAllSessions(filters?: {
   pageSize?: number;
 }): SessionListResult {
   const db = getDb();
-  let sql = "SELECT * FROM sessions WHERE 1=1";
-  let countSql = "SELECT COUNT(*) as total FROM sessions WHERE 1=1";
+  // Build a shared WHERE clause + bind array. The list query folds by
+  // session_key (one row per key, latest session_id wins, with a
+  // session_id_count aggregate), while the count query reports the number
+  // of distinct session_keys after the same filter. This preserves the
+  // original constitution §1.2 semantic of "main table = one row per
+  // session, history sub-table for older session_ids" — pre-Round 7 the
+  // sessions table PK was (session_key) so this was free; Round 7
+  // widened the PK to (session_key, session_id) for parent-child
+  // lineage support, which silently broke that semantic until v0.1.4
+  // restored it at the query layer.
+  let where = " WHERE 1=1";
   const p: any[] = [];
 
   if (filters?.isCron === true) {
-    sql += " AND channel = 'cron'";
-    countSql += " AND channel = 'cron'";
+    where += " AND channel = 'cron'";
   } else if (filters?.isCron === false) {
-    sql += " AND channel != 'cron'";
-    countSql += " AND channel != 'cron'";
+    where += " AND channel != 'cron'";
   }
 
   if (filters?.channel) {
-    sql += " AND channel = ?";
-    countSql += " AND channel = ?";
+    where += " AND channel = ?";
     p.push(filters.channel);
   }
   if (filters?.agent) {
-    sql += " AND agent_id = ?";
-    countSql += " AND agent_id = ?";
+    where += " AND agent_id = ?";
     p.push(filters.agent);
   }
   if (filters?.state) {
-    sql += " AND diag_state = ?";
-    countSql += " AND diag_state = ?";
+    where += " AND diag_state = ?";
     p.push(filters.state);
   }
   if (filters?.diag) {
-    sql += " AND diag LIKE ?";
-    countSql += " AND diag LIKE ?";
+    where += " AND diag LIKE ?";
     p.push(`%${filters.diag}%`);
   }
   if (filters?.label) {
-    sql += " AND label LIKE ?";
-    countSql += " AND label LIKE ?";
+    where += " AND label LIKE ?";
     p.push(`%${filters.label}%`);
   }
   if (filters?.parentId) {
-    sql += " AND parent_session_id = ?";
-    countSql += " AND parent_session_id = ?";
+    where += " AND parent_session_id = ?";
     p.push(filters.parentId);
   } else if (filters?.parentKey) {
-    sql += " AND parent_session_key = ?";
-    countSql += " AND parent_session_key = ?";
+    where += " AND parent_session_key = ?";
     p.push(filters.parentKey);
   }
   if (filters?.q) {
-    const clause = " AND (session_key LIKE ? OR label LIKE ? OR session_id LIKE ?)";
-    sql += clause;
-    countSql += clause;
+    where += " AND (session_key LIKE ? OR label LIKE ? OR session_id LIKE ?)";
     p.push(`%${filters.q}%`, `%${filters.q}%`, `%${filters.q}%`);
   }
 
+  const countSql = `SELECT COUNT(DISTINCT session_key) as total FROM sessions${where}`;
   const total = (db.prepare(countSql).get(...p) as any).total;
   const page = filters?.page || 1;
   const pageSize = filters?.pageSize || 15;
-  sql += " ORDER BY updated_at DESC LIMIT ? OFFSET ?";
 
-  const rows = db.prepare(sql).all(...p, pageSize, (page - 1) * pageSize) as unknown as SessionRow[];
+  // Window-function fold: pick the latest (updated_at, session_id) row per
+  // session_key, plus an aggregate count of sibling session_ids. SQLite
+  // window functions are stable since 3.25; node:sqlite ships with a
+  // compatible version on Node 22.
+  const listSql = `
+    WITH ranked AS (
+      SELECT
+        s.*,
+        ROW_NUMBER() OVER (
+          PARTITION BY session_key
+          ORDER BY updated_at DESC, session_id DESC
+        ) AS _rn,
+        COUNT(*) OVER (PARTITION BY session_key) AS session_id_count
+      FROM sessions s${where}
+    )
+    SELECT * FROM ranked WHERE _rn = 1
+    ORDER BY updated_at DESC, session_id DESC
+    LIMIT ? OFFSET ?
+  `;
+  const rows = db.prepare(listSql).all(...p, pageSize, (page - 1) * pageSize) as unknown as SessionRow[];
   return { sessions: rows, total, page, pageSize };
 }
 
 export function getSession(key: string): SessionRow | null {
-  return (getDb().prepare("SELECT * FROM sessions WHERE session_key = ?").get(key) as unknown as SessionRow) || null;
+  // Multiple session_id rows can share a session_key (Round 7 schema).
+  // Return the latest row by (updated_at, session_id) so callers that
+  // expect "the current session for this key" get a consistent row,
+  // matching the main-table fold in getAllSessions.
+  return (
+    (getDb()
+      .prepare("SELECT * FROM sessions WHERE session_key = ? ORDER BY updated_at DESC, session_id DESC LIMIT 1")
+      .get(key) as unknown as SessionRow) || null
+  );
 }

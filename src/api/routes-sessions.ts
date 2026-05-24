@@ -75,6 +75,11 @@ export const handleSessionsRoutes = {
         parentLabel: s.parent_session_id ? parentInfo.get(s.parent_session_id)?.label || null : null,
         parentAgentId: s.parent_session_id ? parentInfo.get(s.parent_session_id)?.agentId || null : null,
         childCount: childCounts.get(s.session_id) || 0,
+        // v0.1.4: how many sibling session_id rows share this session_key.
+        // 1 = no siblings (normal); >1 = the main table folded N runtime
+        // sessions onto one row (the latest by updated_at, session_id).
+        // Frontend can render an "[+N more]" expand hint.
+        sessionIdCount: s.session_id_count || 1,
         latestRun: latestRun
           ? {
               runId: latestRun.run_id,
