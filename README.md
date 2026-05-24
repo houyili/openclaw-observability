@@ -1,5 +1,10 @@
 # OpenClaw Observability
 
+[![CI](https://github.com/houyili/openclaw-observability/actions/workflows/ci.yml/badge.svg)](https://github.com/houyili/openclaw-observability/actions/workflows/ci.yml)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![Node](https://img.shields.io/badge/node-22%2B-green.svg)](https://nodejs.org/)
+[![Latest release](https://img.shields.io/github/v/release/houyili/openclaw-observability?sort=semver)](https://github.com/houyili/openclaw-observability/releases)
+
 OpenClaw Observability is a self-hosted dashboard for transcript-based
 agent monitoring. It reads OpenClaw session JSONL files plus
 `openclaw sessions --json`, persists the derived state in SQLite, and
@@ -24,6 +29,20 @@ backend, and no LLM summarization in the observability path.
   from assistant `usage` fields.
 - CLI bridge: `/observ <subcommand>` handlers backed by the same SQLite
   store, suitable for chat-channel integrations.
+
+## Screenshots
+
+![Fleet summary and Sessions table](docs/screenshots/01-summary.png)
+*Fleet summary with token totals, active sessions, recent errors, and the Sessions table with per-row activity sparkline.*
+
+![Workflow Graph swimlane](docs/screenshots/02-workflow-graph.png)
+*Deterministic Workflow Graph: User / Parent Session / OpenClaw Runtime / Child Session / Workflow State swimlanes with full provenance on every event.*
+
+![Context Length view](docs/screenshots/03-context-length.png)
+*Per-turn Context Length view: coarse 5-bucket breakdown, per-turn timeline, phase auto-detection, and death-loop heuristics.*
+
+![Tab 4 MCPs — installed-but-unused MCPs surface](docs/screenshots/04-tab-mcps.png)
+*Tab 4 lists every installed MCP, including ones with zero calls (constitution §4.3.1).*
 
 ## Requirements
 
@@ -168,6 +187,20 @@ More detail:
 - [`CONTRIBUTING.md`](CONTRIBUTING.md)
 - [`SECURITY.md`](SECURITY.md)
 - [`CHANGELOG.md`](CHANGELOG.md)
+
+## How it compares
+
+| Trade-off | OpenClaw Observability | Langfuse | Phoenix (Arize) | Helicone |
+|---|---|---|---|---|
+| Data source | OpenClaw transcript JSONL + `openclaw sessions --json` | Application-emitted spans (OTel-flavoured) | OTel spans | Proxy / SDK call interception |
+| LLM in the observability path | No — every view is deterministic projection | Yes (summarisation, eval) | Yes (eval, datasets) | Yes (auto-tagging) |
+| Hosted backend | None (local-first) | Cloud SaaS or self-host | Cloud or self-host | Cloud SaaS |
+| Runtime npm dependencies | 0 | many | many | many |
+| Build step | None (`--experimental-strip-types`) | Required | Required | Required |
+| Best fit | OpenClaw fleet operators who need source-of-truth session/workflow observability without coupling to a hosted vendor | Teams instrumenting LLM apps with OTel-style spans and wanting hosted dashboards / evals | Teams wanting OTel-native LLM tracing + notebook-friendly eval | Teams using OpenAI/Anthropic via proxy and wanting drop-in monitoring |
+| Not designed for | Generic OTel ingest, multi-tenant SaaS | OpenClaw-native session / workflow projection | OpenClaw-native session / workflow projection | OpenClaw-native session / workflow projection |
+
+OpenClaw Observability is intentionally narrow: it answers "what is my OpenClaw fleet doing right now, and where did parent/child coordination break?" rather than being a general-purpose LLM observability backend.
 
 ## License
 
