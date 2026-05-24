@@ -69,7 +69,7 @@ jobs:
         with:
           fetch-depth: 1
           ref: ${{ needs.release-please.outputs.tag_name }}
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: "22"
       - name: Pack source tarball
