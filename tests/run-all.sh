@@ -40,6 +40,10 @@
 #   mcp-registry-coverage — Tab 4 §4.3.1 unused-MCP visibility +
 #                     openclaw.json / mcp/*.json scanner
 #                     (mcp-registry-coverage.test.ts) — hermetic
+#   metrics         — Prometheus /metrics text exposition format,
+#                     HELP/TYPE pairing, zero-fallback states/statuses,
+#                     and registry/auth-poll counters
+#                     (metrics.test.ts) — hermetic
 #   redact          — tests/_lib/redact.ts unit suite for live-test
 #                     output redaction (redact.test.ts) — hermetic
 #   demo-seed       — scripts/seed-demo-home.ts end-to-end seeding
@@ -54,7 +58,7 @@
 #   perf            — wall-clock + CPU budgets for hot paths (perf-bench.ts)
 #
 # Hermetic suites (no live obs-v2 service or live transcripts needed):
-#   unit, invariants, fixture, transcript-consistency-e2e, prompt-check, open-source-sanitization, auth-stale, context-length, cli-commands, frontend-detail, workflow-projection, workflow-frontend, session-id-scope, env-config, service-self-check, installer-scripts, watcher-rehome, token-backfill, parent-child, mcp-registry-coverage, redact, demo-seed
+#   unit, invariants, fixture, transcript-consistency-e2e, prompt-check, open-source-sanitization, auth-stale, context-length, cli-commands, frontend-detail, workflow-projection, workflow-frontend, session-id-scope, env-config, service-self-check, installer-scripts, watcher-rehome, token-backfill, parent-child, mcp-registry-coverage, metrics, redact, demo-seed
 #
 # Live suites (need a running obs-v2 + ~/.openclaw/agents/<agent>/sessions/):
 #   integrity, live-e2e, replay, cross-check, perf
@@ -72,7 +76,7 @@ NODE_BIN="${NODE_BIN:-$HOME/.local/bin/node}"
 [ -x "$NODE_BIN" ] || NODE_BIN="node"
 NODE_FLAGS="--experimental-sqlite --experimental-strip-types --no-warnings"
 
-FILTER="${TEST_FILTER:-unit invariants fixture transcript-consistency-e2e prompt-check open-source-sanitization auth-stale context-length cli-commands frontend-detail workflow-projection workflow-frontend session-id-scope env-config service-self-check installer-scripts watcher-rehome token-backfill parent-child mcp-registry-coverage redact demo-seed integrity live-e2e replay cross-check perf}"
+FILTER="${TEST_FILTER:-unit invariants fixture transcript-consistency-e2e prompt-check open-source-sanitization auth-stale context-length cli-commands frontend-detail workflow-projection workflow-frontend session-id-scope env-config service-self-check installer-scripts watcher-rehome token-backfill parent-child mcp-registry-coverage metrics redact demo-seed integrity live-e2e replay cross-check perf}"
 
 total_fail=0
 run_suite() {
@@ -113,6 +117,7 @@ run_suite "watcher-rehome"  "tests/watcher-rehome.test.ts"
 run_suite "token-backfill"  "tests/token-backfill.test.ts"
 run_suite "parent-child"   "tests/parent-child.test.ts"
 run_suite "mcp-registry-coverage" "tests/mcp-registry-coverage.test.ts"
+run_suite "metrics"         "tests/metrics.test.ts"
 run_suite "redact"          "tests/redact.test.ts"
 run_suite "demo-seed"       "tests/demo-seed.test.ts"
 run_suite "integrity"       "tests/data-integrity.test.ts"

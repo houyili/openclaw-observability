@@ -47,6 +47,16 @@ appear in logs, command history, screenshots, and proxy diagnostics.
 Localhost, static assets, and `/healthz` remain accessible for service health
 checks.
 
+### `/metrics` Endpoint
+
+`/metrics` follows the same auth posture as `/healthz`: localhost is
+always exempt, and the endpoint is reachable without a token from the
+loopback interface so Prometheus / scrape agents do not need bearer
+plumbing. When `OBS_AUTH_TOKEN` is set, non-local `/metrics` requests
+still require `Authorization: Bearer <token>`. The endpoint emits only
+aggregate counters (no session keys, no transcript content), so the
+non-local enforcement is conservative rather than load-bearing.
+
 ## Remote Tunnels
 
 The tunnel scripts are optional and default-safe:

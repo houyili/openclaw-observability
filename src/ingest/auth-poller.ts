@@ -53,18 +53,23 @@ let pollInFlight = false;
 let lastPollSuccessAt: number | null = null;
 let lastPollFailureAt: number | null = null;
 let lastPollError: string | null = null;
+// Cumulative failure counter exposed via /metrics. Incremented on every
+// error path of pollAuthSessionsAsync (and pollAuthSessions); never decremented.
+let pollFailuresTotal = 0;
 
 export function getAuthPollStatus(): {
   lastSuccessAt: number | null;
   lastFailureAt: number | null;
   lastError: string | null;
   inFlight: boolean;
+  failuresTotal: number;
 } {
   return {
     lastSuccessAt: lastPollSuccessAt,
     lastFailureAt: lastPollFailureAt,
     lastError: lastPollError,
     inFlight: pollInFlight,
+    failuresTotal: pollFailuresTotal,
   };
 }
 
@@ -82,6 +87,7 @@ export function pollAuthSessionsAsync(callback: (sessions: AuthSession[]) => voi
     if (err) {
       lastPollFailureAt = Date.now();
       lastPollError = (err.message || "unknown error").slice(0, 200);
+      pollFailuresTotal++;
       console.error(`[auth-poller] Failed after ${elapsedMs}ms:`, lastPollError);
       callback([]);
       return;
@@ -100,6 +106,9 @@ export function pollAuthSessions(): AuthSession[] {
       encoding: "utf-8",
     });
   } catch (err) {
+    lastPollFailureAt = Date.now();
+    lastPollError = ((err as Error).message || "unknown error").slice(0, 200);
+    pollFailuresTotal++;
     console.error("[auth-poller] Failed:", (err as Error).message?.slice(0, 120));
     return [];
   }

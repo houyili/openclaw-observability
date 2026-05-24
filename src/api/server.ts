@@ -26,7 +26,8 @@ function checkAuth(req: IncomingMessage, query: Record<string, string>): boolean
     path === "/index.html" ||
     path.endsWith(".css") ||
     path.endsWith(".js") ||
-    path.startsWith("/healthz")
+    path.startsWith("/healthz") ||
+    path === "/metrics"
   )
     return true;
   // API endpoints require token
@@ -49,6 +50,7 @@ import { getAllRegistry } from "../storage/registry-repo.ts";
 import { getSummaryStats } from "../storage/steps-repo.ts";
 import { handleHealthRoute } from "./routes-health.ts";
 import { handleMcpsRoute } from "./routes-mcps.ts";
+import { handleMetricsRoute } from "./routes-metrics.ts";
 import { handleScriptsRoute } from "./routes-scripts.ts";
 import { handleSessionsRoutes } from "./routes-sessions.ts";
 import { handleSkillsRoute } from "./routes-skills.ts";
@@ -146,6 +148,7 @@ export function startServer(): void {
       if (path === "/api/summary") return sendJson(res, getSummaryStats());
       if (path === "/api/registry") return sendJson(res, getAllRegistry());
       if (path === "/healthz") return handleHealthRoute(res, sendJson);
+      if (path === "/metrics") return handleMetricsRoute(res);
 
       send404(res);
     } catch (err) {
