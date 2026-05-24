@@ -65,7 +65,7 @@ jobs:
       id-token: write
       attestations: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 1
           ref: ${{ needs.release-please.outputs.tag_name }}
