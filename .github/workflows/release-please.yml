@@ -78,7 +78,7 @@ jobs:
         # no .git, no .env, no logs / DB / runtime state).
         run: npm pack --pack-destination ./release-artifacts/
       - name: Attest tarball provenance
-        uses: actions/attest-build-provenance@v1
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: "release-artifacts/*.tgz"
       - name: Upload tarball to the GitHub Release
