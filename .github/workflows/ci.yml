@@ -11,7 +11,7 @@ on:
 #     an hour of Actions budget.
 #   - concurrency cancels older in-flight runs on the same ref so
 #     a fast-follow push does not queue up redundant work.
-#   - actions/checkout@v4 stays the canonical action; fetch-depth: 1
+#   - actions/checkout@v6 stays the canonical action; fetch-depth: 1
 #     keeps the network round-trip small and reduces exposure to the
 #     transient checkout failures observed during the v0.1.1 push
 #     (see agents_design_doc/opensource/08_..._risk_register.md R8).
@@ -26,7 +26,7 @@ jobs:
       group: ci-${{ github.workflow }}-${{ github.ref }}
       cancel-in-progress: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 1
       - uses: actions/setup-node@v4
