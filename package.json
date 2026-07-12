@@ -79,6 +79,6 @@
     "@biomejs/biome": "^2.4.15",
     "@types/node": "^25.9.1",
     "c8": "^11.0.0",
-    "typescript": "^6.0.3"
+    "typescript": "^7.0.2"
   }
 }
